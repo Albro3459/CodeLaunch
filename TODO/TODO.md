@@ -9,8 +9,8 @@ Target public hostname: `code.<your-domain>`
 Build a local agent host with:
 
 - Claude Code running GPT-5.6 Sol through CLIProxyAPI.
-- Sol able to delegate Claude Code subagent work to GPT-5.6 Luna and GPT-5.5.
-- A separate native Claude Code provider for Claude Opus 4.8 and Claude Sonnet 5.
+- The same Claude Code model-role and subagent definitions resolving to native Claude models or Codex models according to the active provider.
+- A native Claude Code provider for Claude Fable 5, Opus 4.8, Sonnet 5, and Haiku.
 - T3 Code Desktop for local use and a T3 HTTP/WebSocket backend for remote use.
 - Cloudflare Access, Tunnel, and DNS in front of the T3 backend.
 
@@ -18,16 +18,19 @@ Build a local agent host with:
 
 Use two Claude Code provider profiles in T3 Code:
 
-1. **Claude via CLIProxyAPI**: Sol main agent with Luna and GPT-5.5 subagents, authenticated to the Codex subscription through CLIProxyAPI's own OAuth flow.
-2. **Claude Native**: existing Claude subscription login with Opus 4.8 and Sonnet 5.
+1. **Claude via CLIProxyAPI**: Codex subscription authenticated through CLIProxyAPI, with Claude Code roles remapped as Fable -> GPT-5.6 Sol, Opus -> GPT-5.6 Luna, Sonnet -> GPT-5.5, and Haiku -> GPT-5.4 mini.
+2. **Claude Native**: existing Claude subscription login with the normal Fable, Opus, Sonnet, and Haiku mappings.
 
-Both profiles use the same installed `claude` executable. A second Claude Code installation is not needed. The separation comes from provider-specific environment variables and a separate Claude home/state directory for the CLIProxyAPI-backed profile.
+Both profiles use the same installed `claude` executable and the same normal Claude home. In T3, leave **Claude HOME path** empty for both profiles so both read `~/.claude/settings.json`, `~/.claude/CLAUDE.md`, agents, skills, MCP configuration, and session state. A second Claude Code installation or second Claude home is not needed. The provider-specific environment variables create the routing separation.
 
 CLIProxyAPI supports both Codex and Claude OAuth providers. This plan only requires Codex OAuth in CLIProxyAPI because the normal Claude Code profile is already authenticated directly to the Claude subscription. Keeping the subscriptions in separate profiles makes routing and credential ownership obvious:
 
-- **Implement first:** Sol -> Luna/GPT-5.5 within the CLIProxyAPI-backed profile.
-- **Use separately:** Opus 4.8 and Sonnet 5 in the native Claude profile.
+- **Implement first:** one shared Claude Code configuration with provider-specific alias resolution.
+- **Native profile:** `fable`, `opus`, `sonnet`, and `haiku` retain their normal Claude meanings.
+- **CLIProxyAPI profile:** the same aliases resolve to Sol, Luna, GPT-5.5, and GPT-5.4 mini respectively.
 - **Not required for this plan:** Claude OAuth inside CLIProxyAPI or a mixed GPT/Claude subagent tree. CLIProxyAPI may make that experiment possible, but it needs a separate live compatibility test and is outside the requested two-session design.
+
+The shared home means a single alias-based agent definition works in both profiles. Use `model: fable`, `model: opus`, `model: sonnet`, or `model: haiku` in agent frontmatter instead of hard-coding provider-specific model IDs. Keep all CLIProxyAPI variables scoped to the CLIProxyAPI T3 provider or the `claudex` invocation; never put them in shared `~/.claude/settings.json`.
 
 Do not expose CLIProxyAPI through Cloudflare. Explicitly bind it to `127.0.0.1`; its documented default host setting otherwise listens on all interfaces. Configure a strong local API key even though only T3 is exposed publicly. Expose only T3 Code through the tunnel.
 
@@ -38,16 +41,19 @@ The Codex CLI is not required for the proxy-backed Claude Code profile. `cliprox
 ```text
 Native Claude session
   same claude binary
-  normal ~/.claude home and existing Claude subscription login
+  shared ~/.claude configuration and existing Claude subscription login
   no ANTHROPIC_BASE_URL override
-  Opus 4.8 / Sonnet 5
+  Fable 5 / Opus 4.8 / Sonnet 5 / Haiku
 
 Codex-model session in Claude Code harness
   same claude binary
-  isolated ~/.claude_cliproxy_home
+  same shared ~/.claude configuration
   ANTHROPIC_BASE_URL=http://127.0.0.1:8317
   CLIProxyAPI-owned ChatGPT/Codex subscription login
-  Sol main / Luna and GPT-5.5 subagents
+  fable -> GPT-5.6 Sol
+  opus -> GPT-5.6 Luna
+  sonnet -> GPT-5.5
+  haiku -> GPT-5.4 mini
 ```
 
 ## Current machine findings
@@ -86,7 +92,7 @@ Skip this subsection when the only Codex-model path will be Claude Code -> CLIPr
   ```
 
 - [ ] If installed, confirm the standalone `codex` path is stable and configure that exact binary path in T3 if the macOS GUI does not inherit the terminal `PATH`.
-- [ ] If installed, inspect the available model catalog and confirm this subscription exposes `gpt-5.6-sol`, `gpt-5.6-luna`, and `gpt-5.5`.
+- [ ] If installed, inspect the available model catalog and confirm this subscription exposes `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5`, and `gpt-5.4-mini`.
 
   ```bash
   codex debug models
@@ -97,7 +103,7 @@ Notes:
 - Official Codex authentication supports ChatGPT subscription login and API-key login. Use ChatGPT login here so usage follows the Codex subscription.
 - The proxy login and standalone Codex CLI login are separate flows. The proxy does not need the CLI login.
 - If the CLI is installed, the Codex CLI and IDE extension share cached login state. The current public docs do not promise that an already-running desktop app alone makes a newly installed CLI ready for T3, so explicitly verify with `codex login status`.
-- `gpt-5.6-luna` is the exact model ID; `5.6 luna` is only a human-readable name.
+- `gpt-5.6-luna` and `gpt-5.4-mini` are the exact model IDs; the display names are not model IDs.
 
 ## Phase 2: CLIProxyAPI and Codex OAuth
 
@@ -145,21 +151,32 @@ CLIProxyAPI is third-party software, even though the supplied OpenAI employee po
   Expected origin: `http://127.0.0.1:8317`. Stop and fix the configuration if it listens on a LAN address or `0.0.0.0`.
 
 - [ ] Put the same local API key in a private shell environment or secret store as `CLIPROXY_LOCAL_API_KEY`. Do not put it in this repository.
-- [ ] Create the isolated Claude home and launch a one-off Sol session using the adjusted Tibo/Theo recipe.
+- [ ] Launch a one-off Sol session from the existing shared Claude home using the adjusted Tibo/Theo recipe and the four role mappings.
 
   ```bash
-  mkdir -p "$HOME/.claude_cliproxy_home"
-  HOME="$HOME/.claude_cliproxy_home" \
   ANTHROPIC_BASE_URL=http://127.0.0.1:8317 \
   ANTHROPIC_AUTH_TOKEN="$CLIPROXY_LOCAL_API_KEY" \
-  CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1 \
+  ANTHROPIC_API_KEY= \
+  ANTHROPIC_DEFAULT_FABLE_MODEL=gpt-5.6-sol \
+  ANTHROPIC_DEFAULT_FABLE_MODEL_NAME='GPT-5.6 Sol' \
+  ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_effort \
+  ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5.6-luna \
+  ANTHROPIC_DEFAULT_OPUS_MODEL_NAME='GPT-5.6 Luna' \
+  ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_effort \
+  ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.5 \
+  ANTHROPIC_DEFAULT_SONNET_MODEL_NAME='GPT-5.5' \
+  ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.4-mini \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME='GPT-5.4 mini' \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort \
   CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=3 \
   ENABLE_TOOL_SEARCH=false \
-  claude --model gpt-5.6-sol
+  claude --model fable
   ```
 
-- [ ] In the proxied session, run `/status`, verify the base URL and Sol model, then perform a harmless tool-call smoke test.
-- [ ] Use `/effort low`, `/effort medium`, and `/effort high` in small prompts and confirm the requested reasoning behavior works.
+- [ ] In the proxied session, run `/status`, verify the base URL and that `fable` resolves to Sol, then perform a harmless tool-call smoke test. Confirm the request appears in CLIProxyAPI logs; this is the gate proving the shared cached Claude login did not bypass the provider environment.
+- [ ] Open `/model` and confirm the friendly GPT names appear for all four remapped roles.
+- [ ] Use `/effort low`, `/effort medium`, `/effort high`, and `/effort xhigh` in small prompts. Also test `/effort max` on Sol and Luna only. Confirm CLIProxyAPI logs report the requested model and effort.
 - [ ] Record `cliproxyapi`'s installed version and the exact GPT model IDs returned by a live request.
 
 ### Why the tweet alias is adjusted
@@ -168,74 +185,97 @@ The post's exact alias sets `CLAUDE_CODE_SUBAGENT_MODEL=gpt-5.6-sol`. Current Cl
 
 For this setup:
 
-- Keep `claude --model gpt-5.6-sol` for the parent.
-- Omit `CLAUDE_CODE_SUBAGENT_MODEL` so each agent file can select Luna or GPT-5.5.
-- Keep the effort, concurrency, and tool-search settings from the post initially; change them only after the baseline works.
+- Start the proxied parent with `claude --model fable`; the provider-local mapping resolves that role to GPT-5.6 Sol.
+- Omit `CLAUDE_CODE_SUBAGENT_MODEL` so each agent file's Fable/Opus/Sonnet/Haiku role is respected.
+- Omit `CLAUDE_CODE_EFFORT_LEVEL` and any CLIProxyAPI `payload.override` for `reasoning.effort`; either would lock effort instead of leaving it selectable.
+- Declare effort capabilities per mapped role. Sol and Luna support `low` through `max`; GPT-5.5 and GPT-5.4 mini support `low` through `xhigh`. OpenAI `none` is intentionally not exposed.
+- Keep the concurrency and tool-search settings from the post initially; change them only after the baseline works.
 
-## Phase 3: Sol, Luna, and GPT-5.5 Claude Code agents
+## Phase 3: shared alias-based Claude Code agents
 
-- [ ] Keep GPT-model agents isolated from native Claude sessions. Put them under the proxy profile's user-scoped agent directory: `~/.claude_cliproxy_home/.claude/agents/`.
-- [ ] Do not put the GPT-model definitions in this repository's shared `.claude/agents/` directory unless it is acceptable for native Claude sessions to discover unusable GPT agent definitions too.
-- [ ] Add a Luna worker, for example `~/.claude_cliproxy_home/.claude/agents/luna-worker.md`:
+- [ ] Keep the existing `~/.claude/settings.json`, `~/.claude/CLAUDE.md`, user skills, MCP configuration, and agents as the single shared Claude Code configuration.
+- [ ] Define reusable agents with Claude role aliases rather than provider-specific model IDs. The same file then selects a native Claude model under **Claude Native** and the paired GPT model under **Claude via CLIProxyAPI**.
+- [ ] Use this compatibility map:
+
+  | Agent frontmatter | Claude Native | Claude via CLIProxyAPI | Available GPT effort |
+  | --- | --- | --- | --- |
+  | `model: fable` | Fable 5 | GPT-5.6 Sol | `low`, `medium`, `high`, `xhigh`, `max` |
+  | `model: opus` | Opus 4.8 | GPT-5.6 Luna | `low`, `medium`, `high`, `xhigh`, `max` |
+  | `model: sonnet` | Sonnet 5 | GPT-5.5 | `low`, `medium`, `high`, `xhigh` |
+  | `model: haiku` | current Haiku | GPT-5.4 mini | `low`, `medium`, `high`, `xhigh` |
+
+- [ ] For a flexible agent, omit `effort` frontmatter so the session or per-invocation selection controls it. For a stable preset such as a fast worker, add a supported value explicitly:
 
   ```markdown
   ---
-  name: luna-worker
+  name: fast-worker
   description: Fast delegated implementation, lookup, and mechanical work. Use when speed matters.
-  model: gpt-5.6-luna
+  model: haiku
+  effort: low
   ---
 
   Complete the delegated task. Keep changes scoped, report verification, and return blockers precisely.
   ```
 
-- [ ] Add a GPT-5.5 worker/reviewer, for example `~/.claude_cliproxy_home/.claude/agents/gpt-5-5-worker.md`:
-
-  ```markdown
-  ---
-  name: gpt-5-5-worker
-  description: Independent implementation or review using GPT-5.5.
-  model: gpt-5.5
-  ---
-
-  Complete the delegated task independently. Report findings, changes, and remaining risks.
-  ```
-
-- [ ] Start the Sol session, open `/agents`, and verify both proxy-profile user agents are discovered with the intended full model IDs.
-- [ ] Ask Sol to delegate one bounded task to `luna-worker` and one to `gpt-5-5-worker`.
-- [ ] Check CLIProxyAPI logs to prove that the child requests used different model IDs. Do not accept only the subagent's self-reported model name as proof.
+- [ ] Do not put full GPT IDs into shared agent frontmatter unless that agent is intentionally unusable in the native Claude profile.
+- [ ] In each provider, open `/agents` and verify the same shared agents are discovered.
+- [ ] Run one bounded delegation through each role in each provider. Check CLIProxyAPI logs to prove the proxied child requests resolved to Sol, Luna, GPT-5.5, and GPT-5.4 mini. Do not accept only the subagent's self-reported model name as proof.
 - [ ] Test context compaction in a disposable long session before relying on this setup for production work.
 
-Compatibility gate: Claude Code officially allows `sonnet`, `opus`, `haiku`, `inherit`, or a full model ID in subagent frontmatter. Arbitrary GPT IDs work here only because the third-party proxy accepts and translates them. Treat the live Agent-tool smoke test as mandatory.
+Compatibility gate: the role aliases and their effort-capability metadata are native Claude Code configuration surfaces, while the GPT destinations depend on CLIProxyAPI accepting and translating the mapped full model IDs. Treat the live Agent-tool and effort smoke tests as mandatory.
 
-## Phase 4: native Opus 4.8 and Sonnet 5
+## Phase 4: native Fable 5, Opus 4.8, Sonnet 5, and Haiku
 
 - [ ] Preserve the existing subscription-authenticated Claude Code environment as the native provider. Do not place proxy environment variables in global shell startup files or the shared native `~/.claude/settings.json`.
 - [ ] Continue using the existing `~/.local/bin/claude` executable and normal `~/.claude` state. Do not install Claude Code again.
-- [ ] In native Claude Code, verify access to the canonical model IDs:
+- [ ] In native Claude Code, verify the normal aliases resolve to the expected subscription models without any proxy variables:
 
-  - `claude-opus-4-8`
-  - `claude-sonnet-5`
+  - `fable` -> Fable 5
+  - `opus` -> Opus 4.8
+  - `sonnet` -> Sonnet 5
+  - `haiku` -> the current Haiku model available to the account
 
-- [ ] Add native project agents only if useful, using the canonical full IDs in frontmatter.
-- [ ] Use Opus and Sonnet through the separate native T3 provider/session for the baseline setup. Do not add Claude OAuth to CLIProxyAPI until both independent profiles pass their smoke tests.
+- [ ] Use alias-based shared agents so the same definitions work in the CLIProxyAPI profile.
+- [ ] Do not add Claude OAuth to CLIProxyAPI until both independent profiles pass their smoke tests.
 
 ### Optional terminal convenience command
 
-A `claudex` shell function or wrapper is useful for terminal sessions, but it is not a second Claude installation. It launches the same `claude` binary with the CLIProxyAPI profile's environment. This version preserves Tibo's useful settings but intentionally omits `CLAUDE_CODE_SUBAGENT_MODEL`:
+A `claudex` shell function or wrapper is useful for terminal sessions, but it is not a second Claude installation. It launches the same `claude` binary and shared Claude home with the CLIProxyAPI provider environment. `ANTHROPIC_MODEL=fable` provides the default Sol role, while an explicit `--model` and `--effort` remain selectable:
 
 ```zsh
 claudex() {
-  HOME="$HOME/.claude_cliproxy_home" \
   ANTHROPIC_BASE_URL=http://127.0.0.1:8317 \
   ANTHROPIC_AUTH_TOKEN="$CLIPROXY_LOCAL_API_KEY" \
-  CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1 \
+  ANTHROPIC_API_KEY= \
+  ANTHROPIC_MODEL=fable \
+  ANTHROPIC_DEFAULT_FABLE_MODEL=gpt-5.6-sol \
+  ANTHROPIC_DEFAULT_FABLE_MODEL_NAME='GPT-5.6 Sol' \
+  ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_effort \
+  ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5.6-luna \
+  ANTHROPIC_DEFAULT_OPUS_MODEL_NAME='GPT-5.6 Luna' \
+  ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_effort \
+  ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.5 \
+  ANTHROPIC_DEFAULT_SONNET_MODEL_NAME='GPT-5.5' \
+  ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.4-mini \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME='GPT-5.4 mini' \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort \
   CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=3 \
   ENABLE_TOOL_SEARCH=false \
-  command claude --model gpt-5.6-sol "$@"
+  command claude "$@"
 }
 ```
 
-Use a function instead of a simple alias so arguments such as `claudex --resume` are forwarded reliably. T3 Desktop will not normally load an interactive shell alias/function; configure the same binary, separate Claude home, and environment variables in the T3 provider instead.
+Examples:
+
+```bash
+claudex                                      # Fable role -> GPT-5.6 Sol
+claudex --model opus --effort low            # Opus role -> GPT-5.6 Luna
+claudex --model sonnet --effort xhigh        # Sonnet role -> GPT-5.5
+claudex --model haiku --effort medium        # Haiku role -> GPT-5.4 mini
+```
+
+Use a function instead of a simple alias so arguments such as `claudex --resume` are forwarded reliably. T3 Desktop will not normally load an interactive shell alias/function; configure the same binary, shared Claude home, and environment variables in the T3 provider instead.
 
 ### Optional hybrid experiment
 
@@ -281,22 +321,32 @@ CLIProxyAPI also documents Claude OAuth, so a Sol-first mixed-provider experimen
   ```text
   Display name: Claude via CLIProxyAPI
   Binary path: /Users/<mac-user>/.local/bin/claude
-  Claude HOME path: ~/.claude_cliproxy_home
+  Claude HOME path: empty
   ANTHROPIC_BASE_URL=http://127.0.0.1:8317
   ANTHROPIC_AUTH_TOKEN=<CLIPROXY_LOCAL_API_KEY>
-  ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5.6-sol
-  ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.6-sol
-  ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.6-luna
-  CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1
+  ANTHROPIC_API_KEY=<empty value>
+  ANTHROPIC_DEFAULT_FABLE_MODEL=gpt-5.6-sol
+  ANTHROPIC_DEFAULT_FABLE_MODEL_NAME=GPT-5.6 Sol
+  ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_effort
+  ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5.6-luna
+  ANTHROPIC_DEFAULT_OPUS_MODEL_NAME=GPT-5.6 Luna
+  ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_effort
+  ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.5
+  ANTHROPIC_DEFAULT_SONNET_MODEL_NAME=GPT-5.5
+  ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort
+  ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.4-mini
+  ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME=GPT-5.4 mini
+  ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort
   CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=3
   ENABLE_TOOL_SEARCH=false
   ```
 
-  Put these values in the provider's Environment variables section, not in launch arguments. Mark the local API key as sensitive. Do not set `CLAUDE_CODE_SUBAGENT_MODEL`; it would override the Luna/GPT-5.5 agent files. Select `gpt-5.6-sol` explicitly as the main model in T3 if the provider UI offers a model picker.
+  Put these values in the provider's Environment variables section, not in launch arguments. Mark the local API key as sensitive. Do not set `ANTHROPIC_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`, or `CLAUDE_CODE_EFFORT_LEVEL` in T3; those could override the interactive main-model choice, per-agent model roles, or selectable effort. Both profiles intentionally have an empty Claude HOME path and therefore share `~/.claude`. Select Fable as the default main role through T3 if its provider UI supports a default without locking the thread picker.
 
-- [ ] Do not authenticate the isolated proxy Claude home with the Claude subscription. Its token is the local CLIProxyAPI client key, while CLIProxyAPI owns the separate ChatGPT/Codex OAuth credential.
-- [ ] Start one T3 thread with **Claude Native** and select Opus 4.8 or Sonnet 5.
-- [ ] Start a different T3 thread with **Claude via CLIProxyAPI** and verify Sol is the main model.
+- [ ] Start one T3 thread with **Claude Native** and verify Fable, Opus, Sonnet, and Haiku retain their normal native mappings.
+- [ ] Start a different T3 thread with **Claude via CLIProxyAPI** and verify Fable, Opus, Sonnet, and Haiku display the friendly GPT names and route to Sol, Luna, GPT-5.5, and GPT-5.4 mini.
+- [ ] Confirm `/status` and CLIProxyAPI logs prove the shared cached Claude subscription did not bypass the proxy environment. If this fails in the installed Claude Code/T3 versions, fall back to a separate Claude home; do not log out the shared native subscription as a workaround.
+- [ ] Confirm T3 treats both providers as continuation-compatible because their Claude HOME paths match. Verify switching provider/model on an existing disposable thread before relying on it for real work.
 - [ ] Optionally configure a third, direct Codex provider only after installing and logging in to the standalone Codex CLI. This is not required for using Codex models through the Claude Code harness.
 - [ ] Create a disposable T3 project and run one prompt through each provider.
 - [ ] Record the actual local T3 backend port. Documentation examples use `3773`, but the tunnel configuration must use the port shown by the installed version.
@@ -438,8 +488,10 @@ Prerequisites:
 
 ## Open questions / live-test gates
 
-- [ ] Does the ChatGPT subscription expose all three requested GPT IDs through CLIProxyAPI today? Entitlement can vary by account and upstream rollout.
-- [ ] Does Claude Code `2.1.215` accept CLIProxyAPI's arbitrary GPT full IDs in proxy-profile subagent frontmatter without an `availableModels` restriction?
+- [ ] Does the ChatGPT subscription expose all four mapped GPT IDs through CLIProxyAPI today? Entitlement can vary by account and upstream rollout.
+- [ ] Does Claude Code `2.1.215` display all four friendly mapped model names and the declared per-model effort capabilities behind the custom base URL?
+- [ ] With both T3 providers sharing the normal Claude home, do `ANTHROPIC_AUTH_TOKEN`, the empty `ANTHROPIC_API_KEY`, and `ANTHROPIC_BASE_URL` reliably override the cached native Claude subscription only for the CLIProxyAPI provider?
+- [ ] Does T3 permit provider switching on an existing thread when both Claude providers have the same empty Claude HOME path but different provider environment variables?
 - [ ] Does the T3 Desktop-managed backend remain reachable from same-host `cloudflared` while Network access is off?
 - [ ] Does the installed T3 release serve its web UI directly at the tunnel hostname, or is hosted `app.t3.codes` pairing required for this mode?
 - [ ] Does hosted `app.t3.codes` work with the Access-protected cross-origin WebSocket in the target browsers?
@@ -447,7 +499,7 @@ Prerequisites:
 
 ## Sources
 
-- [Linked Claude artifact supplied with the request](https://claude.ai/code/artifact/<TUNNEL_UUID>#no_universal_links) (not retrievable without an interactive Claude session during this research)
+- [Claude `claudex` setup artifact supplied with the request](https://claude.ai/code/artifact/<TUNNEL_UUID>#no_universal_links) — reviewed from the user-supplied Markdown export; confirms the shared-home, invocation-scoped proxy pattern
 - [Tibo's CLIProxyAPI/`claudex` post](https://x.com/thsottiaux/status/2076119366647894371) — supplied recipe and environment variables; the user also supplied the full post text because X retrieval was unreliable
 - [CLIProxyAPI repository](https://github.com/router-for-me/CLIProxyAPI) — supported OAuth providers and Anthropic-compatible endpoint
 - [CLIProxyAPI quick start](https://help.router-for.me/introduction/quick-start) — Homebrew installation, executable, service, and default config path
@@ -455,10 +507,13 @@ Prerequisites:
 - [CLIProxyAPI Codex OAuth](https://help.router-for.me/configuration/provider/codex) — Codex login and browser callback flow
 - [CLIProxyAPI Claude Code client](https://help.router-for.me/agent-client/claude-code) — `ANTHROPIC_BASE_URL`, client token, Claude Code v2 model variables, and model selection
 - [OpenAI GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model) — Sol/Terra/Luna roles, model IDs, and effort levels
+- [OpenAI GPT-5.4 mini model](https://developers.openai.com/api/docs/models/gpt-5.4-mini) — exact model ID, subagent/high-volume role, and supported effort levels
 - [OpenAI Codex authentication](https://learn.chatgpt.com/docs/auth) — ChatGPT subscription login, API-key login, caching, and credential storage
 - [OpenAI Codex CLI](https://learn.chatgpt.com/docs/codex/cli) — current standalone installation flow
 - [OpenAI Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc) — native-Claude-orchestrator hybrid option
 - [Claude Code custom subagents](https://code.claude.com/docs/en/sub-agents) — agent files, full model IDs, and `CLAUDE_CODE_SUBAGENT_MODEL` precedence
+- [Claude Code model configuration](https://code.claude.com/docs/en/model-config) — Fable/Opus/Sonnet/Haiku aliases, custom display names, gateway model IDs, and per-model effort capabilities
+- [Claude Code memory](https://code.claude.com/docs/en/memory) — shared `~/.claude/CLAUDE.md` behavior and importing `AGENTS.md`
 - [Claude model IDs](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions) — `claude-opus-4-8` and `claude-sonnet-5`
 - [T3 Code README](https://github.com/pingdotgg/t3code) — supported providers, Desktop installation, and CLI entrypoint
 - [T3 Code Claude provider guide](https://github.com/pingdotgg/t3code/blob/main/docs/providers/claude.md) — multiple Claude homes and provider environment variables

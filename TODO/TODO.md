@@ -243,7 +243,7 @@ payload:
 
 - [ ] Verify the exact `payload` schema (rule types `default` / `default-raw` / `override` / `override-raw`, the `models`/`name`/`protocol` shape, and the `reasoning.effort` gjson/sjson path) against the installed CLIProxyAPI version before relying on it.
 - [ ] Confirm the correct `protocol` value for how CLIProxyAPI routes these models to the Codex upstream (`codex` is the expected value; verify it matches the rule that actually fires in the logs).
-- [ ] Live-test the layering: with no client effort, confirm each model runs at its default; then set a subagent `effort` and confirm it overrides the default for that agent only. CLIProxyAPI has had open issues around effort translation between clients and upstream, so prove the applied effort from the logs, not from the client UI.
+- [x] Live-test the layering (raw `/v1/chat/completions`, 2026-07-21): with no client effort, `gpt-5.6-sol` reasoning tokens tracked forced `high` and sat well above forced `low`, confirming the `default` rule injects `high` and yields to an explicit client value. Still to test through Claude Code: that a subagent `effort` frontmatter overrides the default for that agent only.
 
 - [ ] Put the same local API key in a private shell environment or secret store as `CLIPROXY_LOCAL_API_KEY`. Do not put it in this repository.
 - [ ] Create `~/.claudex` as the isolated Claudex configuration directory. Copy or link only the settings, skills, commands, rules, and MCP configuration that should be common. Do not copy native authentication caches or session state wholesale.
@@ -631,7 +631,7 @@ Start the whole stack from one script rather than login launch agents. The Mac i
 
 ## Open questions / live-test gates
 
-- [ ] Does the ChatGPT subscription expose all four mapped GPT IDs through CLIProxyAPI today? Entitlement can vary by account and upstream rollout.
+- [x] Does the ChatGPT subscription expose all four mapped GPT IDs through CLIProxyAPI today? Confirmed 2026-07-21 on a ChatGPT Plus account: `/v1/models` returns `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5`, and `gpt-5.4-mini` (plus `gpt-5.6-terra`, `gpt-5.4`, `gpt-5.3-codex-spark`). CLIProxyAPI `v7.2.92`.
 - [ ] Does Claude Code `2.1.215` display all four friendly mapped model names behind the custom base URL? (Names use `_NAME`, which the docs confirm works behind a gateway.)
 - [ ] Is `/effort` actually selectable through the proxy? The docs indicate `_SUPPORTED_CAPABILITIES` does not take effect behind a custom base URL, so effort capability must come from `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` reading CLIProxyAPI's `/v1/models`. Confirm the proxy reports effort metadata there, or find the actual mechanism that enables `/effort` for the GPT models. Independent of the answer, the Phase 2C per-model `payload.default` rules set the baseline effort; the open question only affects whether per-turn and per-subagent overrides layer on top.
 - [ ] Does CLIProxyAPI refresh the Codex OAuth token automatically, and what is the observed token lifetime before an on-host `--codex-login` is required?

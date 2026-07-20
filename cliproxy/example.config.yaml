@@ -1,0 +1,36 @@
+# Copy to config.yaml and set a real api-key. config.yaml is gitignored.
+# host is 0.0.0.0 inside the container; exposure is restricted by the
+# 127.0.0.1 publish in docker-compose.yml.
+host: "0.0.0.0"
+port: 8317
+
+remote-management:
+  allow-remote: false
+  secret-key: ""
+
+auth-dir: "/root/.cli-proxy-api"
+
+api-keys:
+  - "REPLACE_WITH_LOCAL_API_KEY"
+
+# Per-model effort baselines. `default` only fills reasoning.effort when the
+# client omits it, so a subagent's effort frontmatter or the /effort slider
+# still wins. Do NOT use `override` here (it force-replaces client values).
+# Schema and `protocol` value are unverified against the installed version;
+# confirm the applied effort in the container logs.
+payload:
+  default:
+    - models:
+        - name: "gpt-5.6-sol"
+          protocol: "codex"
+        - name: "gpt-5.6-luna"
+          protocol: "codex"
+      params:
+        "reasoning.effort": "high"
+    - models:
+        - name: "gpt-5.5"
+          protocol: "codex"
+        - name: "gpt-5.4-mini"
+          protocol: "codex"
+      params:
+        "reasoning.effort": "medium"

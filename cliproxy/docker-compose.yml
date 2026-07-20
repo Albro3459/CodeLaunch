@@ -1,0 +1,10 @@
+services:
+  cliproxyapi:
+    image: eceasy/cli-proxy-api:latest
+    container_name: cliproxyapi
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8317:8317"   # host loopback only; never 0.0.0.0 on the host side
+    volumes:
+      - ./config.yaml:/CLIProxyAPI/config.yaml:ro
+      - ./auth:/root/.cli-proxy-api

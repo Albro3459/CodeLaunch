@@ -2,7 +2,7 @@
 
 Research date: 2026-07-20
 Target host: ARM macOS 26
-Target public hostname: `code.<your-domain>`
+Target public hostname: `code.<domain>`
 
 ## Outcome
 
@@ -20,6 +20,14 @@ Use two Claude Code provider profiles in T3 Code:
 
 1. **Claude via CLIProxyAPI**: Codex subscription authenticated through CLIProxyAPI, with Claude Code roles remapped as Fable -> GPT-5.6 Sol, Opus -> GPT-5.6 Luna, Sonnet -> GPT-5.5, and Haiku -> GPT-5.4 mini.
 2. **Claude Native**: existing Claude subscription login with the normal Fable, Opus, Sonnet, and Haiku mappings.
+
+Model-ID verification (2026-07-20), all confirmed against OpenAI's model docs:
+
+- `gpt-5.6-sol` and `gpt-5.6-luna`: GPT-5.6 supports `none, low, medium, high, xhigh, max`.
+- `gpt-5.5` (snapshot `gpt-5.5-2026-04-23`): supports `none, low, medium, high, xhigh`; no `max`.
+- `gpt-5.4-mini` (snapshot `gpt-5.4-mini-2026-03-17`): supports `none, low, medium, high, xhigh`; no `max`.
+
+These are provider-side mappings only: each Claude role is a label CLIProxyAPI routes to the GPT model above. The role names carry no capability meaning here.
 
 Both profiles use the same installed `claude` executable but separate configuration directories. Native Claude keeps the default `~/.claude`. Claudex sets `CLAUDE_CONFIG_DIR=~/.claudex`, which is Claude Code's supported configuration-directory override. A second Claude Code installation and a fake alternate macOS `HOME` are not needed.
 
@@ -66,6 +74,7 @@ Codex-model session in Claude Code harness
 - [ ] Decide whether to install the standalone Codex CLI. It is optional for the proxy-backed Claude profile, but required for T3's native Codex provider and the optional official Codex plugin.
 - [ ] Install T3 Code. `t3` is not currently on `PATH`.
 - [ ] Install `cloudflared`. It is not currently on `PATH`.
+- [ ] Install Docker Desktop and confirm `docker` and `docker compose` are available. CLIProxyAPI runs in Docker for portability; T3, `claude`, and `cloudflared` stay native.
 
 ## Phase 1: prerequisites
 
@@ -110,14 +119,78 @@ Notes:
 
 CLIProxyAPI is third-party software, even though the supplied OpenAI employee post recommends this recipe. Pin or record the installed version, review release notes before upgrades, and expect compatibility to need retesting after Claude Code or Codex changes.
 
-- [ ] Install the current Homebrew formula.
+Deployment choice: run CLIProxyAPI in Docker (portable across machines and operating systems, only the proxy is containerized) with a native Homebrew install as the fallback. CLIProxyAPI is the one component that containerizes cleanly here: it is a stateless HTTP server whose only persistent state is the OAuth cache. T3, the `claude` binary, and `cloudflared` stay native on the Mac because they are tied to this host's GUI app, logins, and config-directory isolation; see Phase 5.
+
+### 2A. Docker deployment (preferred)
+
+- [ ] Confirm Docker Desktop is installed and running.
+
+  ```bash
+  docker version
+  docker compose version
+  ```
+
+- [ ] Create a project directory (outside this repository) with `config.yaml` and `docker-compose.yml`. Publish only to loopback and mount the auth directory so OAuth state survives container restarts. Use a newly generated high-entropy value for `<CLIPROXY_LOCAL_API_KEY>` and never commit it.
+
+  ```yaml
+  # config.yaml
+  host: "0.0.0.0"   # binds inside the container only; the published port restricts exposure to loopback
+  port: 8317
+
+  remote-management:
+    allow-remote: false
+    secret-key: ""
+
+  auth-dir: "/data/.cli-proxy-api"
+
+  api-keys:
+    - "<CLIPROXY_LOCAL_API_KEY>"
+  ```
+
+  ```yaml
+  # docker-compose.yml
+  services:
+    cliproxyapi:
+      image: ghcr.io/router-for-me/cliproxyapi:latest   # confirm the exact published image name/tag before use
+      restart: unless-stopped
+      ports:
+        - "127.0.0.1:8317:8317"   # host loopback only; never 0.0.0.0 on the host side
+      volumes:
+        - ./config.yaml:/app/config.yaml:ro
+        - cliproxy-auth:/data/.cli-proxy-api
+  volumes:
+    cliproxy-auth:
+  ```
+
+  In Docker the container's `host` is set to `0.0.0.0` so the process is reachable inside the container network, and exposure is restricted by publishing to `127.0.0.1:8317` on the host. Verify the exact image name, tag, and in-container config/auth paths against current CLIProxyAPI docs before first run; pin a specific tag rather than `latest` once confirmed.
+
+- [ ] Authenticate the Codex subscription against the containerized proxy. The browser OAuth callback uses local port `1455`, so run the login with `--no-browser` from inside the container and complete the flow in the host browser; the mounted `cliproxy-auth` volume persists the result.
+
+  ```bash
+  docker compose run --rm -p 127.0.0.1:1455:1455 cliproxyapi --codex-login --no-browser
+  ```
+
+  This is CLIProxyAPI's own ChatGPT/Codex OAuth flow. It does not require the Codex CLI and does not reuse the native Claude Code login. Confirm exactly how the installed image expects `--codex-login` to be invoked and whether the `1455` callback must be published; adjust the command to match.
+
+- [ ] Start the service and confirm the exact loopback listener.
+
+  ```bash
+  docker compose up -d
+  docker compose ps
+  ```
+
+  Expected origin from the host: `http://127.0.0.1:8317`. Confirm with `lsof -nP -iTCP:8317 -sTCP:LISTEN` that only a loopback listener exists on the host. Stop and fix the compose port mapping if it publishes on a LAN address or `0.0.0.0`.
+
+### 2B. Homebrew fallback (native)
+
+- [ ] Install the current Homebrew formula (no tap required).
 
   ```bash
   brew install cliproxyapi
   cliproxyapi --help
   ```
 
-- [ ] Before starting the service, edit the Homebrew configuration file. On an Apple Silicon Homebrew installation the default path is normally `/opt/homebrew/etc/cliproxyapi.conf`; confirm it with `brew --prefix` if needed. Use a newly generated high-entropy value for `<CLIPROXY_LOCAL_API_KEY>` and never commit it.
+- [ ] Before starting the service, edit the configuration file. On an Apple Silicon Homebrew installation the default path is normally `/opt/homebrew/etc/cliproxyapi.conf`; confirm it with `brew --prefix` if needed. CLIProxyAPI docs suggest keeping the real config at `~/.cli-proxy-api/config.yaml` and symlinking the Homebrew path to it; either way, edit exactly one authoritative file. Use a newly generated high-entropy value for `<CLIPROXY_LOCAL_API_KEY>` and never commit it.
 
   ```yaml
   host: "127.0.0.1"
@@ -133,23 +206,44 @@ CLIProxyAPI is third-party software, even though the supplied OpenAI employee po
     - "<CLIPROXY_LOCAL_API_KEY>"
   ```
 
-  The explicit host is mandatory. CLIProxyAPI documents an empty host as listening on every interface. An empty management secret disables the management API; leave remote management off.
+  For the native path the explicit `127.0.0.1` host is mandatory. CLIProxyAPI documents an empty host as listening on every interface. An empty management secret disables the management API; leave remote management off.
 
-- [ ] Authenticate CLIProxyAPI directly with the Codex subscription.
+- [ ] Authenticate CLIProxyAPI directly with the Codex subscription. The browser OAuth callback uses local port `1455`.
 
   ```bash
   cliproxyapi --codex-login
   ```
 
-  This launches CLIProxyAPI's own ChatGPT/Codex OAuth flow. It does not require the Codex CLI and does not reuse the native Claude Code login. Use `--no-browser` only if the normal browser callback flow cannot be used.
+  Use `--no-browser` only if the normal browser callback flow cannot be used. Start the service with `brew services start cliproxyapi` and confirm the origin `http://127.0.0.1:8317`; stop and fix the configuration if it listens on a LAN address or `0.0.0.0`.
 
-- [ ] Start the service and confirm the exact loopback listener.
+### 2C. Effort policy (per-model defaults)
 
-  ```bash
-  brew services start cliproxyapi
-  ```
+CLIProxyAPI's `payload` section applies request rules per model. Use **`default`** rules, which set `reasoning.effort` only when the client omits it — this yields a per-model baseline while still letting a subagent's `effort` frontmatter or the interactive `/effort` slider win when Claude Code sends one. Do **not** use `override` (it force-replaces the client value and erases per-subagent and per-turn choices). Add this to whichever config file the deployment uses (Docker `config.yaml` or the native `.conf`).
 
-  Expected origin: `http://127.0.0.1:8317`. Stop and fix the configuration if it listens on a LAN address or `0.0.0.0`.
+Desired baselines: `high` for Sol and Luna, `medium` for GPT-5.5 and GPT-5.4 mini. Because the rule keys on the destination model, Luna gets `high` whether it is the main agent or a subagent, unless its subagent frontmatter sends a lower value for the sub case.
+
+```yaml
+payload:
+  default:
+    - models:
+        - name: "gpt-5.6-sol"
+          protocol: "codex"
+        - name: "gpt-5.6-luna"
+          protocol: "codex"
+      params:
+        "reasoning.effort": "high"
+    - models:
+        - name: "gpt-5.5"
+          protocol: "codex"
+        - name: "gpt-5.4-mini"
+          protocol: "codex"
+      params:
+        "reasoning.effort": "medium"
+```
+
+- [ ] Verify the exact `payload` schema (rule types `default` / `default-raw` / `override` / `override-raw`, the `models`/`name`/`protocol` shape, and the `reasoning.effort` gjson/sjson path) against the installed CLIProxyAPI version before relying on it.
+- [ ] Confirm the correct `protocol` value for how CLIProxyAPI routes these models to the Codex upstream (`codex` is the expected value; verify it matches the rule that actually fires in the logs).
+- [ ] Live-test the layering: with no client effort, confirm each model runs at its default; then set a subagent `effort` and confirm it overrides the default for that agent only. CLIProxyAPI has had open issues around effort translation between clients and upstream, so prove the applied effort from the logs, not from the client UI.
 
 - [ ] Put the same local API key in a private shell environment or secret store as `CLIPROXY_LOCAL_API_KEY`. Do not put it in this repository.
 - [ ] Create `~/.claudex` as the isolated Claudex configuration directory. Copy or link only the settings, skills, commands, rules, and MCP configuration that should be common. Do not copy native authentication caches or session state wholesale.
@@ -157,10 +251,10 @@ CLIProxyAPI is third-party software, even though the supplied OpenAI employee po
 - [ ] Launch a one-off Sol session from the isolated Claudex profile using the adjusted Tibo/Theo recipe and the four role mappings.
 
   ```bash
+  env -u ANTHROPIC_API_KEY \
   CLAUDE_CONFIG_DIR="$HOME/.claudex" \
   ANTHROPIC_BASE_URL=http://127.0.0.1:8317 \
   ANTHROPIC_AUTH_TOKEN="$CLIPROXY_LOCAL_API_KEY" \
-  ANTHROPIC_API_KEY= \
   ANTHROPIC_DEFAULT_FABLE_MODEL=gpt-5.6-sol \
   ANTHROPIC_DEFAULT_FABLE_MODEL_NAME='GPT-5.6 Sol' \
   ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_effort \
@@ -173,15 +267,30 @@ CLIProxyAPI is third-party software, even though the supplied OpenAI employee po
   ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.4-mini \
   ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME='GPT-5.4 mini' \
   ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort \
+  CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 \
   CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=3 \
   ENABLE_TOOL_SEARCH=false \
   claude --model fable
   ```
 
+  `env -u ANTHROPIC_API_KEY` removes any inherited key instead of setting an empty string; empty-string versus unset behavior is version-dependent and not documented, so unset it explicitly. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` lets Claude Code read model metadata, including effort capabilities, from CLIProxyAPI's `/v1/models`, which is the gateway-path substitute for the `_SUPPORTED_CAPABILITIES` variables that a custom base URL may ignore.
+
 - [ ] In the proxied session, run `/status`, verify `CLAUDE_CONFIG_DIR`, the base URL, and that `fable` resolves to Sol, then perform a harmless tool-call smoke test. Confirm the request appears in CLIProxyAPI logs.
 - [ ] Open `/model` and confirm the friendly GPT names appear for all four remapped roles.
 - [ ] Use `/effort low`, `/effort medium`, `/effort high`, and `/effort xhigh` in small prompts. Also test `/effort max` on Sol and Luna only. Confirm CLIProxyAPI logs report the requested model and effort.
 - [ ] Record `cliproxyapi`'s installed version and the exact GPT model IDs returned by a live request.
+
+### 2D. Codex OAuth re-authentication
+
+CLIProxyAPI's public Codex provider docs cover the initial `--codex-login` flow and the local `1455` callback but do not document token-refresh behavior, expiry handling, or a status command. Treat re-auth as empirically validated, not doc-guaranteed. This matters for an always-on remote host: a silently expired Codex token turns every proxied request into an auth failure with no native Claude fallback.
+
+- [ ] Locate where the OAuth credentials are stored (`auth-dir`: `~/.cli-proxy-api` natively, or the mounted `cliproxy-auth` volume in Docker). Confirm the credential file is present after login and never committed.
+- [ ] Determine empirically whether CLIProxyAPI refreshes the Codex token automatically while running, or whether refresh only happens at startup. Record the observed token lifetime.
+- [ ] Write down the exact re-login recovery command for each deployment:
+  - Docker: `docker compose run --rm -p 127.0.0.1:1455:1455 cliproxyapi --codex-login --no-browser`, then `docker compose up -d`.
+  - Native: `cliproxyapi --codex-login`, then restart the service.
+- [ ] Add a lightweight health check that distinguishes an expired Codex token from a proxy-down state, so a re-login is triggered rather than a blind restart. A failing authenticated request through `http://127.0.0.1:8317` with a valid local API key indicates the upstream Codex credential, not the proxy, is the problem.
+- [ ] Decide how re-auth is surfaced remotely: the `1455` browser callback requires host access, so a remote-only session cannot complete a fresh OAuth login. Confirm the token lifetime is long enough for the intended remote-use windows, or plan periodic on-host re-login.
 
 ### Why the tweet alias is adjusted
 
@@ -191,9 +300,15 @@ For this setup:
 
 - Start the proxied parent with `claude --model fable`; the provider-local mapping resolves that role to GPT-5.6 Sol.
 - Omit `CLAUDE_CODE_SUBAGENT_MODEL` so each agent file's Fable/Opus/Sonnet/Haiku role is respected.
-- Omit `CLAUDE_CODE_EFFORT_LEVEL` and any CLIProxyAPI `payload.override` for `reasoning.effort`; either would lock effort instead of leaving it selectable.
+- Omit `CLAUDE_CODE_EFFORT_LEVEL` (a single global value that cannot vary per model) and any CLIProxyAPI `payload.override` for `reasoning.effort`; both hard-lock effort. Use per-model `payload.default` rules instead (Phase 2 effort-policy step) so each model gets a baseline while per-subagent and per-turn choices still win.
 - Declare effort capabilities per mapped role. Sol and Luna support `low` through `max`; GPT-5.5 and GPT-5.4 mini support `low` through `xhigh`. OpenAI `none` is intentionally not exposed.
 - Keep the concurrency and tool-search settings from the post initially; change them only after the baseline works.
+
+**Capability-declaration caveat (verified 2026-07-20).** Claude Code's `model-config` docs state that the `_NAME`, `_DESCRIPTION`, and `_SUPPORTED_CAPABILITIES` companion variables "take effect on third-party providers such as Amazon Bedrock, Google Cloud's Agent Platform, and Microsoft Foundry," and that only `_NAME` and `_DESCRIPTION` "also take effect when `ANTHROPIC_BASE_URL` points to an LLM gateway." A custom base URL like CLIProxyAPI is treated as a gateway, so `_SUPPORTED_CAPABILITIES` is likely ignored on this path. The friendly GPT display names will still appear, but selectable per-role effort may not. Two consequences:
+
+- Behind a gateway, capability detection falls back to model-ID pattern matching (a `gpt-*` ID matches no Claude pattern, so `/effort` may be absent) or to gateway model discovery. Set `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` and confirm CLIProxyAPI's `/v1/models` reports the effort capability metadata for each model. Treat "is `/effort` selectable through the proxy?" as a mandatory live gate, not an assumption.
+- Effort strategy regardless of whether `/effort` works: set per-model **`default`** rules in CLIProxyAPI's `payload` config (see Phase 2's effort-policy step). `default` fills `reasoning.effort` only when the client omits it, so it gives a guaranteed per-model baseline (`high` for sol/luna, `medium` for 5.5/5.4-mini) that reaches the model even if Claude Code never exposes the control, while still yielding to any effort the client does send. Do not use `override` here — `override` force-replaces the client value and would erase per-subagent and per-turn choices.
+- If `_SUPPORTED_CAPABILITIES` ever does take effect here, note the doc rule: "listed capabilities are enabled and unlisted capabilities are disabled." The value `effort,xhigh_effort,max_effort` omits `thinking`, `adaptive_thinking`, and `interleaved_thinking`, so those would be turned off. Add them if that reasoning behavior is wanted through the proxy.
 
 ## Phase 3: isolated GPT-named Claudex agents
 
@@ -219,7 +334,7 @@ For this setup:
   Complete the delegated task independently. Report findings, changes, verification, and remaining risks.
   ```
 
-- [ ] Add equivalent `gpt-5-5` and `gpt-5-4-mini` agents using `model: sonnet` and `model: haiku`. Omit `effort` when it should remain selectable; set a supported effort only for an intentional fixed preset.
+- [ ] Add equivalent `gpt-5-5` and `gpt-5-4-mini` agents using `model: sonnet` and `model: haiku`. Effort layering: leave `effort` out of frontmatter to let the model's Phase 2C proxy default apply (`high` for Luna, `medium` for GPT-5.5 / GPT-5.4 mini). Set an explicit `effort` in an agent's frontmatter only to make that subagent run *below* its model default — for example a `low` or `medium` `effort` on the `gpt-5-6-luna` agent so Luna-as-sub is cheaper than Luna-as-main. This only takes effect if Claude Code sends effort behind the gateway; if it does not, the proxy default applies to both cases.
 - [ ] Open `/agents` in Claudex and verify all three GPT-named agents are discovered. Explicit invocation can use `@agent-gpt-5-6-luna`, `@agent-gpt-5-5`, or `@agent-gpt-5-4-mini`.
 - [ ] Run one bounded delegation through each agent. Check CLIProxyAPI logs to prove the child requests resolved to Luna, GPT-5.5, and GPT-5.4 mini. Do not accept only the subagent's self-reported model name as proof.
 - [ ] Test context compaction in a disposable long session before relying on this setup for production work.
@@ -246,10 +361,10 @@ A `claudex` shell function or wrapper is useful for terminal sessions, but it is
 
 ```zsh
 claudex() {
+  env -u ANTHROPIC_API_KEY \
   CLAUDE_CONFIG_DIR="$HOME/.claudex" \
   ANTHROPIC_BASE_URL=http://127.0.0.1:8317 \
   ANTHROPIC_AUTH_TOKEN="$CLIPROXY_LOCAL_API_KEY" \
-  ANTHROPIC_API_KEY= \
   ANTHROPIC_MODEL=fable \
   ANTHROPIC_DEFAULT_FABLE_MODEL=gpt-5.6-sol \
   ANTHROPIC_DEFAULT_FABLE_MODEL_NAME='GPT-5.6 Sol' \
@@ -263,6 +378,7 @@ claudex() {
   ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.4-mini \
   ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME='GPT-5.4 mini' \
   ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort \
+  CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 \
   CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=3 \
   ENABLE_TOOL_SEARCH=false \
   command claude "$@"
@@ -328,7 +444,7 @@ CLIProxyAPI also documents Claude OAuth, so a Sol-first mixed-provider experimen
   CLAUDE_CONFIG_DIR=/Users/<mac-user>/.claudex
   ANTHROPIC_BASE_URL=http://127.0.0.1:8317
   ANTHROPIC_AUTH_TOKEN=<CLIPROXY_LOCAL_API_KEY>
-  ANTHROPIC_API_KEY=<empty value>
+  (do not add ANTHROPIC_API_KEY at all; a GUI field cannot unset an inherited key, and empty-string behavior is undocumented. Confirm the launched process has no ANTHROPIC_API_KEY in its environment.)
   ANTHROPIC_DEFAULT_FABLE_MODEL=gpt-5.6-sol
   ANTHROPIC_DEFAULT_FABLE_MODEL_NAME=GPT-5.6 Sol
   ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_effort
@@ -341,6 +457,7 @@ CLIProxyAPI also documents Claude OAuth, so a Sol-first mixed-provider experimen
   ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.4-mini
   ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME=GPT-5.4 mini
   ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort
+  CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
   CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=3
   ENABLE_TOOL_SEARCH=false
   ```
@@ -387,7 +504,7 @@ Prerequisites:
 
 - [ ] In Cloudflare Zero Trust, configure an identity provider. For a personal deployment, the Cloudflare identity provider with **Restrict to account members** is a simple fit. An existing Google, GitHub, Entra ID, Okta, OIDC, or SAML provider is also valid.
 - [ ] Turn on independent MFA at the organization level.
-- [ ] Create a self-hosted Access application for `code.<your-domain>`.
+- [ ] Create a self-hosted Access application for `code.<domain>`.
 - [ ] Create an Allow policy with an exact identity selector:
 
   ```text
@@ -426,7 +543,7 @@ Prerequisites:
   credentials-file: /Users/<mac-user>/.cloudflared/<TUNNEL_UUID>.json
 
   ingress:
-    - hostname: code.<your-domain>
+    - hostname: code.<domain>
       service: http://127.0.0.1:<T3_PORT>
     - service: http_status:404
   ```
@@ -435,13 +552,13 @@ Prerequisites:
 
   ```bash
   cloudflared tunnel ingress validate
-  cloudflared tunnel ingress rule https://code.<your-domain>
+  cloudflared tunnel ingress rule https://code.<domain>
   ```
 
 - [ ] Create the DNS CNAME route with the requested CLI flow.
 
   ```bash
-  cloudflared tunnel route dns t3-code code.<your-domain>
+  cloudflared tunnel route dns t3-code code.<domain>
   ```
 
 - [ ] Confirm the generated proxied CNAME points at `<TUNNEL_UUID>.cfargotunnel.com`.
@@ -455,20 +572,42 @@ Prerequisites:
   ```
 
 - [ ] Confirm the tunnel is Healthy and the local origin does not return a 502.
-- [ ] From a private/incognito browser, visit `https://code.<your-domain>`. Confirm Cloudflare Access blocks the T3 response until the exact email and MFA succeed.
+- [ ] From a private/incognito browser, visit `https://code.<domain>`. Confirm Cloudflare Access blocks the T3 response until the exact email and MFA succeed.
 - [ ] Complete T3's separate one-time pairing flow. Confirm a second browser/device without a T3 session cannot use the backend even after Cloudflare login.
 - [ ] Verify a live agent response streams through the browser. T3 uses WebSockets, and Cloudflare Tunnel supports WebSockets, but the end-to-end flow still needs a real streaming test.
-- [ ] After validation, install `cloudflared` as a per-user macOS launch agent so it reads `~/.cloudflared/config.yml` and starts at login.
+- [ ] After validation, do not install a login/boot launch agent. Instead start the stack on demand with a single orchestration script (see Phase 6D). This keeps startup explicit and ordered rather than tied to login.
+
+### 6D. Startup orchestration script
+
+Start the whole stack from one script rather than login launch agents. The Mac is kept awake separately with `caffeinate` on constant power, so the script only needs to bring services up in dependency order and fail loudly if any step is not healthy.
+
+- [ ] Write a `start.sh` that runs, in order and with health gates:
+
+  1. `docker compose up -d` for CLIProxyAPI, then poll `http://127.0.0.1:8317` with the local API key until it answers. Fail fast if the Codex token is expired (see Phase 2D) so re-login happens before dependents start.
+  2. Start the single T3 backend (Desktop-managed, or `npx t3@latest serve --host 127.0.0.1` for the headless path). Confirm exactly one backend is listening on `127.0.0.1:<T3_PORT>`.
+  3. `cloudflared tunnel run t3-code`, then confirm the tunnel reports Healthy and the origin does not 502.
 
   ```bash
-  cloudflared service install
+  # start.sh (sketch; fill in health checks and the real T3_PORT)
+  set -euo pipefail
+
+  docker compose -f "$HOME/cliproxy/docker-compose.yml" up -d
+  until curl -fsS -H "Authorization: Bearer $CLIPROXY_LOCAL_API_KEY" http://127.0.0.1:8317/v1/models >/dev/null; do
+    sleep 1
+  done
+
+  # start T3 backend here (Desktop app already running, or the headless serve command)
+
+  cloudflared tunnel run t3-code
   ```
 
-  Use the non-`sudo` form for a login launch agent. The `sudo` form is a boot launch daemon and expects configuration under `/etc/cloudflared`.
+- [ ] Write a matching `stop.sh` that stops the tunnel, stops the T3 backend, and runs `docker compose down` in reverse order.
+- [ ] Keep `start.sh`/`stop.sh` and `docker-compose.yml` outside this repository, or ensure no secrets (`CLIPROXY_LOCAL_API_KEY`, tunnel credentials) are committed. Read secrets from the environment or a secret store, not literals.
+- [ ] The Codex OAuth `1455` callback needs on-host browser access, so re-login is an on-host action; `start.sh` should detect the expired-token case and stop with a clear "run --codex-login" message rather than starting a broken tunnel.
 
 ## Phase 7: remote browser validation
 
-- [ ] Prefer the T3 web UI served through `https://code.<your-domain>` so the UI, Access cookie, API, and WebSocket remain on one origin.
+- [ ] Prefer the T3 web UI served through `https://code.<domain>` so the UI, Access cookie, API, and WebSocket remain on one origin.
 - [ ] If using T3's hosted UI at `https://app.t3.codes`, use its HTTPS pairing form only after authenticating directly to the backend hostname. The hosted UI connects directly to the backend; it is not a relay.
 - [ ] Treat hosted-UI plus Cloudflare Access as a compatibility gate. Cross-site Access cookies, CORS, or WebSocket authentication may fail under browser privacy settings. Do not weaken Access to fix this; use the same-origin T3 UI or a trusted private-network option instead.
 - [ ] Test from cellular or a network outside the home LAN.
@@ -478,22 +617,24 @@ Prerequisites:
 
 ## Security acceptance checklist
 
-- [ ] Only `code.<your-domain>` routes through the tunnel; unmatched ingress returns 404.
-- [ ] CLIProxyAPI listens only on `127.0.0.1:8317` and requires the configured local API key.
+- [ ] Only `code.<domain>` routes through the tunnel; unmatched ingress returns 404.
+- [ ] CLIProxyAPI is reachable only on `127.0.0.1:8317` and requires the configured local API key. In Docker, the compose port must publish to `127.0.0.1:8317` on the host, never `0.0.0.0`; verify with `lsof -nP -iTCP:8317 -sTCP:LISTEN`.
 - [ ] T3 listens only on loopback unless LAN access is explicitly required.
 - [ ] Cloudflare Access policy allows one exact email/account and denies everyone else by default.
 - [ ] Independent MFA is required.
 - [ ] Access and MFA session durations are short and tested.
 - [ ] T3 pairing URLs are never committed, logged in tickets, or shared in screenshots.
 - [ ] Old T3 device sessions are revocable and audited periodically.
-- [ ] `~/.codex/auth.json`, `~/.cli-proxy-api/`, the CLIProxyAPI local API key, Cloudflare tunnel credentials, and T3 secrets are never added to this repository.
+- [ ] `~/.codex/auth.json`, `~/.cli-proxy-api/` (and the Docker `cliproxy-auth` volume), the CLIProxyAPI local API key, Cloudflare tunnel credentials, T3 secrets, and any `config.yaml`/`docker-compose.yml`/`start.sh` holding secrets are never added to this repository.
 - [ ] The public browser provider is run with the least practical agent filesystem/shell permissions. Compromise of this UI is equivalent to remote control of local coding agents.
-- [ ] Cloudflare, T3, proxy, Codex CLI, Claude Code, and Node versions are recorded after installation for reproducibility.
+- [ ] Cloudflare, T3, proxy (including the pinned CLIProxyAPI Docker image tag), Docker Desktop, Codex CLI, Claude Code, and Node versions are recorded after installation for reproducibility.
 
 ## Open questions / live-test gates
 
 - [ ] Does the ChatGPT subscription expose all four mapped GPT IDs through CLIProxyAPI today? Entitlement can vary by account and upstream rollout.
-- [ ] Does Claude Code `2.1.215` display all four friendly mapped model names and the declared per-model effort capabilities behind the custom base URL?
+- [ ] Does Claude Code `2.1.215` display all four friendly mapped model names behind the custom base URL? (Names use `_NAME`, which the docs confirm works behind a gateway.)
+- [ ] Is `/effort` actually selectable through the proxy? The docs indicate `_SUPPORTED_CAPABILITIES` does not take effect behind a custom base URL, so effort capability must come from `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` reading CLIProxyAPI's `/v1/models`. Confirm the proxy reports effort metadata there, or find the actual mechanism that enables `/effort` for the GPT models. Independent of the answer, the Phase 2C per-model `payload.default` rules set the baseline effort; the open question only affects whether per-turn and per-subagent overrides layer on top.
+- [ ] Does CLIProxyAPI refresh the Codex OAuth token automatically, and what is the observed token lifetime before an on-host `--codex-login` is required?
 - [ ] Does T3 pass `CLAUDE_CONFIG_DIR=/Users/<mac-user>/.claudex` unchanged to the CLIProxyAPI-backed Claude process and keep its sessions separate from native `~/.claude` sessions?
 - [ ] Does the T3 Desktop-managed backend remain reachable from same-host `cloudflared` while Network access is off?
 - [ ] Does the installed T3 release serve its web UI directly at the tunnel hostname, or is hosted `app.t3.codes` pairing required for this mode?
@@ -510,6 +651,7 @@ Prerequisites:
 - [CLIProxyAPI Codex OAuth](https://help.router-for.me/configuration/provider/codex) — Codex login and browser callback flow
 - [CLIProxyAPI Claude Code client](https://help.router-for.me/agent-client/claude-code) — `ANTHROPIC_BASE_URL`, client token, Claude Code v2 model variables, and model selection
 - [OpenAI GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model) — Sol/Terra/Luna roles, model IDs, and effort levels
+- [OpenAI GPT-5.5 model](https://developers.openai.com/api/docs/models/gpt-5.5) — exact model ID, snapshot `gpt-5.5-2026-04-23`, and supported effort levels (no `max`)
 - [OpenAI GPT-5.4 mini model](https://developers.openai.com/api/docs/models/gpt-5.4-mini) — exact model ID, subagent/high-volume role, and supported effort levels
 - [OpenAI Codex authentication](https://learn.chatgpt.com/docs/auth) — ChatGPT subscription login, API-key login, caching, and credential storage
 - [OpenAI Codex CLI](https://learn.chatgpt.com/docs/codex/cli) — current standalone installation flow

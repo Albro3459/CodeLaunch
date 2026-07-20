@@ -11,6 +11,13 @@ cp cliproxy/config.example.yaml cliproxy/config.yaml
 openssl rand -hex 32                      # generate a key, paste into config.yaml api-keys
 ```
 
+
+Set the KEY var to your shell:
+
+```bash
+KEY=$(grep -oE '[0-9a-f]{64}' cliproxy/config.yaml | head -1)
+```
+
 Codex OAuth login (opens a URL for the host browser; callback -> 127.0.0.1:1455):
 
 ```bash

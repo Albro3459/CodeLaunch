@@ -1,0 +1,19 @@
+{
+  "providerInstances": {
+    "claudex": {
+      "driver": "claudeAgent",
+      "displayName": "Claudex",
+      "accentColor": "#7c3aed",
+      "enabled": true,
+      "config": {
+        "binaryPath": "/Users/<username>/.local/bin/claudex",
+        "customModels": [
+          "GPT-5.6 Sol",
+          "GPT-5.6 Luna",
+          "GPT 5.5",
+          "GPT 5.4 mini"
+        ]
+      }
+    }
+  }
+}

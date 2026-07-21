@@ -1,5 +1,9 @@
 **/config.yaml
+**/config.yaml.*
 **/auth/
 **/*.log
 **/skills
-.env
+**/.env
+**/.env.*
+!**/.env.example
+*.bak

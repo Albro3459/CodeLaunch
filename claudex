@@ -4,7 +4,14 @@
 # Usage: claudex [claude args]   e.g.  claudex --model opus --effort low
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks so the repo is found when invoked via ~/.local/bin/claudex
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE == /* ]] || SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 CONFIG="$SCRIPT_DIR/cliproxy/config.yaml"
 
 KEY="${CLIPROXY_LOCAL_API_KEY:-}"
@@ -13,24 +20,27 @@ if [ -z "$KEY" ] && [ -f "$CONFIG" ]; then
 fi
 [ -z "$KEY" ] && { echo "No local API key. Set CLIPROXY_LOCAL_API_KEY or add it to $CONFIG"; exit 1; }
 
+# GUI launchers (T3) spawn without a login PATH, so fall back to the known path
+CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
+
 exec env -u ANTHROPIC_API_KEY \
   CLAUDE_CONFIG_DIR="$HOME/.claudex" \
   ANTHROPIC_BASE_URL=http://127.0.0.1:8317 \
   ANTHROPIC_AUTH_TOKEN="$KEY" \
   ANTHROPIC_MODEL=opus \
-  ANTHROPIC_DEFAULT_FABLE_MODEL=gpt-5.6-sol \
+  ANTHROPIC_DEFAULT_FABLE_MODEL='GPT-5.6 Sol' \
   ANTHROPIC_DEFAULT_FABLE_MODEL_NAME='GPT-5.6 Sol' \
   ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_effort \
-  ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5.6-luna \
+  ANTHROPIC_DEFAULT_OPUS_MODEL='GPT-5.6 Luna' \
   ANTHROPIC_DEFAULT_OPUS_MODEL_NAME='GPT-5.6 Luna' \
   ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_effort \
-  ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.5 \
+  ANTHROPIC_DEFAULT_SONNET_MODEL='GPT 5.5' \
   ANTHROPIC_DEFAULT_SONNET_MODEL_NAME='GPT-5.5' \
   ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.4-mini \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL='GPT 5.4 mini' \
   ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME='GPT-5.4 mini' \
   ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort \
   CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 \
   CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=3 \
   ENABLE_TOOL_SEARCH=false \
-  claude "$@"
+  "$CLAUDE_BIN" "$@"

@@ -2,7 +2,7 @@
 
 Living command list. Keep updating as each phase lands. Full rationale: `TODO/TODO.md`.
 
-## Step 1 — CLIProxyAPI (Docker)
+## Step 1 - CLIProxyAPI (Docker)
 
 Prereq: Docker Desktop running (`docker version`, `docker compose version`).
 
@@ -52,7 +52,7 @@ Notes:
 - Effort baselines live in `config.yaml` (`payload.default`): high for sol/luna, medium for 5.5/5.4-mini. Confirm the applied effort in `docker compose logs`, not the client UI.
 - Re-auth: rerun `./cliproxy/login.sh`, then `./cliproxy/start.sh`.
 
-## Step 2 — Claudex profile + proxied Claude Code
+## Step 2 - Claudex profile + proxied Claude Code
 
 Profile lives in `~/.claudex` (isolated via `CLAUDE_CONFIG_DIR`): `CLAUDE.md`
 (Luna-primary, imports shared `~/.claude/CLAUDE.md`), `settings.json` (model
@@ -85,10 +85,10 @@ claudex --model haiku --effort low   # 5.4 mini, low effort
 
 In the session, verify:
 
-- `/status` — `CLAUDE_CONFIG_DIR` is `~/.claudex`, base URL `http://127.0.0.1:8317`, model resolves via `opus` (Luna).
-- `/model` — four friendly names appear (GPT-5.6 Sol / Luna, GPT-5.5, GPT-5.4 mini).
-- `/agents` — `gpt-5-6-sol`, `gpt-5-6-luna`, `gpt-5-5`, `gpt-5-4-mini` discovered.
-- `/effort` — whether levels are selectable (open gate; proxy default is the backstop).
+- `/status` - `CLAUDE_CONFIG_DIR` is `~/.claudex`, base URL `http://127.0.0.1:8317`, model resolves via `opus` (Luna).
+- `/model` - four friendly names appear (GPT-5.6 Sol / Luna, GPT-5.5, GPT-5.4 mini).
+- `/agents` - `gpt-5-6-sol`, `gpt-5-6-luna`, `gpt-5-5`, `gpt-5-4-mini` discovered.
+- `/effort` - whether levels are selectable (open gate; proxy default is the backstop).
 
 Prove routing from the proxy side while testing:
 
@@ -99,7 +99,7 @@ docker compose -f cliproxy/docker-compose.yml logs -f
 Delegate once to each agent and confirm the child requests resolve to Luna /
 GPT-5.5 / GPT-5.4 mini in the logs (not just the agent's self-report).
 
-## Step 3 — T3 Code
+## Step 3 - T3 Code
 
 Install the desktop app and confirm the CLI entrypoint:
 
@@ -110,51 +110,43 @@ npx --yes t3@latest --version
 
 Status: `t3-code` 0.0.28 installed as `/Applications/T3 Code (Alpha).app`; CLI
 reports the same `v0.0.28`. Cask has `auto_updates` on, so re-check the version
-and backend port after it updates. Providers not yet configured.
+and backend port after it updates.
 
-Get the proxy key to paste into the provider (do not commit it):
+Configure two providers in T3 Desktop.
 
-```bash
-grep -oE '[0-9a-f]{64}' cliproxy/config.yaml | head -1
-```
+**Claude Native** - leave as installed. T3 resolves the bare `claude` name on
+its own.
 
-Configure two providers in T3 Desktop. Binary path for both is the stable
-symlink, not the versioned target:
+**Claudex** - point at the wrapper, and leave every other field empty:
 
 ```text
-/Users/<username>/.local/bin/claude
+Display name: Claudex
+Binary path:  /Users/<username>/.local/bin/claudex
+Claude HOME path: empty
+Environment variables: none
 ```
 
-**Claude Native** — that binary path, empty Claude HOME, no environment
-variables.
+Two things this gets right, both of which fail silently otherwise:
 
-**Claude via CLIProxyAPI** — same binary path, empty Claude HOME, and these
-environment variables (values mirror `./claudex`, minus `ANTHROPIC_MODEL`):
+- **The path must be absolute.** T3 spawns the binary directly, with no shell,
+  so `~` is never expanded and `~/.local/bin/claudex` fails with
+  `spawn ... ENOENT`. Bare `claude` works only because T3 has its own lookup for
+  the default name; a custom name gets no such treatment.
+- **Claude HOME must stay empty.** Despite the name, that field sets `HOME`, not
+  `CLAUDE_CONFIG_DIR` - the app's own description says "Custom HOME used when
+  running this Claude instance." Setting it to `~/.claudex` makes the wrapper
+  compute `CLAUDE_CONFIG_DIR="$HOME/.claudex"` = `~/.claudex/.claudex`, and
+  Claude starts with no CLAUDE.md, no agents, and no model mappings. The wrapper
+  sets the config dir itself.
 
-```text
-CLAUDE_CONFIG_DIR=/Users/<username>/.claudex
-ANTHROPIC_BASE_URL=http://127.0.0.1:8317
-ANTHROPIC_AUTH_TOKEN=<KEY>
-ANTHROPIC_DEFAULT_FABLE_MODEL=gpt-5.6-sol
-ANTHROPIC_DEFAULT_FABLE_MODEL_NAME=GPT-5.6 Sol
-ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_effort
-ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5.6-luna
-ANTHROPIC_DEFAULT_OPUS_MODEL_NAME=GPT-5.6 Luna
-ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_effort
-ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5.5
-ANTHROPIC_DEFAULT_SONNET_MODEL_NAME=GPT-5.5
-ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort
-ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5.4-mini
-ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME=GPT-5.4 mini
-ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES=effort,xhigh_effort
-CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
-CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=3
-ENABLE_TOOL_SEARCH=false
-```
+No environment variables go in T3. `claudex` supplies the base URL, key, and
+model mappings, so the proxy key never enters T3's secret store and the mapping
+has one source of truth. T3 passes the picked model as a `--model` launch
+argument, which overrides the wrapper's `ANTHROPIC_MODEL=opus`, so the model
+picker still works.
 
-`./claudex` sets `ANTHROPIC_MODEL=opus` to force Luna as primary. Do not carry
-that into T3 — it would pin every thread on this provider to Luna and defeat the
-model picker. Pick the model per thread instead.
+Provider config is stored at `~/.t3/userdata/settings.json`. T3 rewrites that
+file on quit, so edit it only while the app is closed - otherwise use the GUI.
 
 Verify, with the proxy up:
 
@@ -183,7 +175,7 @@ npx --yes t3@latest serve --host 127.0.0.1
 Run only one backend at a time. Pairing tokens and sessions are managed with
 `t3 auth pairing` and `t3 auth session`; treat a pairing URL as a password.
 
-## Step 4 — Cloudflare tunnel + Access
+## Step 4 - Cloudflare tunnel + Access
 
 Status: `cloudflared 2026.7.2` installed. Nothing configured yet.
 
@@ -212,7 +204,7 @@ Independent MFA: required, 1 hour
 ```
 
 No `Include: Everyone`. No `Bypass` policy. No service tokens. Email OTP alone
-allows any valid address — if used, still pin the policy to the exact email.
+allows any valid address - if used, still pin the policy to the exact email.
 Test with the intended email and a different email before continuing.
 
 ### 4B. Tunnel
@@ -236,7 +228,7 @@ ingress:
   - service: http_status:404
 ```
 
-The catch-all `http_status:404` is required — without it the tunnel refuses to
+The catch-all `http_status:404` is required - without it the tunnel refuses to
 start, and it ensures no other hostname reaches the origin.
 
 ```bash

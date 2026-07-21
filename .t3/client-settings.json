@@ -1,0 +1,43 @@
+{
+    "autoOpenPlanSidebar": false,
+    "confirmThreadArchive": false,
+    "confirmThreadDelete": true,
+    "dismissedProviderUpdateNotificationKeys": [],
+    "diffIgnoreWhitespace": true,
+    "favorites": [
+        {
+            "provider": "claudeAgent",
+            "model": "claude-fable-5"
+        },
+        {
+            "provider": "claudeAgent",
+            "model": "claude-opus-4-8"
+        },
+        {
+            "provider": "claudex",
+            "model": "claude-fable-5"
+        },
+        {
+            "provider": "claudex",
+            "model": "claude-opus-4-8"
+        }
+    ],
+    "providerModelPreferences": {
+        "claudex": {
+            "hiddenModels": [
+                "claude-opus-4-7",
+                "claude-opus-4-6",
+                "claude-opus-4-5",
+                "claude-sonnet-4-6"
+            ],
+            "modelOrder": []
+        }
+    },
+    "sidebarProjectGroupingMode": "repository",
+    "sidebarProjectGroupingOverrides": {},
+    "sidebarProjectSortOrder": "updated_at",
+    "sidebarThreadSortOrder": "updated_at",
+    "sidebarThreadPreviewCount": 6,
+    "timestampFormat": "locale",
+    "wordWrap": true
+}

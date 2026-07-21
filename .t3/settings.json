@@ -1,4 +1,19 @@
 {
+  "addProjectBaseDirectory": "~/GitHub",
+  "textGenerationModelSelection": {
+    "instanceId": "claudeAgent",
+    "model": "claude-sonnet-5",
+    "options": [
+      {
+        "id": "effort",
+        "value": "medium"
+      },
+      {
+        "id": "contextWindow",
+        "value": "200k"
+      }
+    ]
+  },
   "providerInstances": {
     "claudex": {
       "driver": "claudeAgent",
@@ -7,12 +22,50 @@
       "enabled": true,
       "config": {
         "binaryPath": "/Users/<username>/.local/bin/claudex",
-        "customModels": [
-          "GPT-5.6 Sol",
-          "GPT-5.6 Luna",
-          "GPT 5.5",
-          "GPT 5.4 mini"
-        ]
+        "customModels": []
+      }
+    },
+    "grok": {
+      "driver": "grok",
+      "enabled": false,
+      "config": {
+        "enabled": true,
+        "binaryPath": "grok",
+        "customModels": []
+      }
+    },
+    "opencode": {
+      "driver": "opencode",
+      "enabled": false,
+      "config": {
+        "enabled": true,
+        "binaryPath": "opencode",
+        "serverUrl": "",
+        "serverPassword": "",
+        "customModels": []
+      }
+    },
+    "codex": {
+      "driver": "codex",
+      "enabled": false,
+      "config": {
+        "enabled": true,
+        "binaryPath": "codex",
+        "homePath": "",
+        "shadowHomePath": "",
+        "customModels": []
+      }
+    },
+    "claudeAgent": {
+      "driver": "claudeAgent",
+      "accentColor": "#16a34a",
+      "enabled": true,
+      "config": {
+        "enabled": true,
+        "binaryPath": "claude",
+        "homePath": "",
+        "customModels": [],
+        "launchArgs": ""
       }
     }
   }

@@ -523,16 +523,18 @@ npx t3@latest serve --host 127.0.0.1
 Prerequisites:
 
 - [x] Put the chosen domain/zone on Cloudflare DNS and confirm its nameservers are active. Confirmed active 2026-07-21.
-- [ ] Choose a single-label hostname such as `code.example.com`.
-- [ ] Decide the exact allowed email address and the Cloudflare account/IdP used to authenticate it.
-- [ ] Use a one-hour Access application/policy session as the initial "short session" value. Adjust only after real use.
+- [x] Choose a single-label hostname such as `code.example.com`. `code.example.com`.
+- [x] Decide the exact allowed email address and the Cloudflare account/IdP used to authenticate it. `you@example.com`, authenticated via the built-in **Cloudflare** IdP (login with the Cloudflare account; MFA inherited from account 2FA).
+- [x] Use a one-hour Access application/policy session as the initial "short session" value. Adjust only after real use. Both app and policy set to `1h`.
+
+Implementation note: 6A/6B were done via the Cloudflare REST API with a scoped, short-lived token instead of the dashboard + `cloudflared tunnel login`. This avoids writing an account-wide `~/.cloudflared/cert.pem` (10-year, manage-all-tunnels credential). The tunnel was created with `POST /accounts/{id}/cfd_tunnel` (`config_src: local`) and a locally generated `tunnel_secret`; `cloudflared tunnel run` works from `config.yml` + the `<UUID>.json` credentials file with no `cert.pem` present. IDs live only on the host / in Cloudflare, not in git. Delete the setup token when done.
 
 ### 6A. Configure Access before starting public ingress
 
-- [ ] In Cloudflare Zero Trust, configure an identity provider. For a personal deployment, the Cloudflare identity provider with **Restrict to account members** is a simple fit. An existing Google, GitHub, Entra ID, Okta, OIDC, or SAML provider is also valid.
-- [ ] Turn on independent MFA at the organization level.
-- [ ] Create a self-hosted Access application for `code.<domain>`.
-- [ ] Create an Allow policy with an exact identity selector:
+- [x] In Cloudflare Zero Trust, configure an identity provider. Org has exactly one IdP, type `cloudflare` (the built-in Cloudflare identity provider), id `a3c84991-...`. App pins `allowed_idps` to it with `auto_redirect_to_identity: true`.
+- [~] Turn on independent MFA at the organization level. Not used: MFA rides the Cloudflare account's own 2FA via the Cloudflare IdP (account 2FA enabled). AMR-based MFA rules only support Okta/Entra/OIDC/SAML, and free-tier availability of Independent MFA is unconfirmed. Revisit if switching IdPs.
+- [x] Create a self-hosted Access application for `code.<domain>`. App `T3 Code`, id `aaeeddb3-...`, `aud 77b4e427...`, `session_duration 1h`.
+- [x] Create an Allow policy with an exact identity selector: reusable account-level policy `<policy-id>-...`, `decision allow`, `include: [{email: you@example.com}]`, `1h`.
 
   ```text
   Action: Allow
@@ -542,9 +544,9 @@ Prerequisites:
   Independent MFA: required, 1 hour
   ```
 
-- [ ] Do not use `Include Everyone`.
-- [ ] Do not use `Include Login Methods: One-time PIN` by itself. That would allow any valid email address. If email OTP is used, still restrict the policy to the exact email.
-- [ ] Test the policy with the intended email and a different email before starting the tunnel.
+- [x] Do not use `Include Everyone`. Single email include only.
+- [x] Do not use `Include Login Methods: One-time PIN` by itself. No OTP IdP configured; only the Cloudflare IdP.
+- [ ] Test the policy with the intended email and a different email before starting the tunnel. Pending — needs a browser login (see 6C verification). Edge gate already confirmed: unauthenticated request 302s to the Access login with the correct `aud`.
 
 ### 6B. Install and create a locally managed Tunnel
 
@@ -555,15 +557,15 @@ Prerequisites:
   cloudflared version
   ```
 
-- [ ] Authenticate the CLI and create the named tunnel.
+- [x] Authenticate the CLI and create the named tunnel. Done via API instead of `cloudflared tunnel login` — tunnel `t3-code`, UUID `1c426c95-...`, `config_src: local`. No `cert.pem` written.
 
   ```bash
-  cloudflared tunnel login
-  cloudflared tunnel create t3-code
-  cloudflared tunnel list
+  # API path used (no cert.pem): generate a 32-byte secret, then
+  # POST /accounts/{id}/cfd_tunnel {"name":"t3-code","config_src":"local","tunnel_secret":"<b64>"}
+  # write ~/.cloudflared/<UUID>.json = {AccountTag, TunnelSecret, TunnelID}
   ```
 
-- [ ] Create `~/.cloudflared/config.yml` locally. Do not commit the credentials JSON or a config containing secrets.
+- [x] Create `~/.cloudflared/config.yml` locally. Do not commit the credentials JSON or a config containing secrets. Both files written under `~/.cloudflared/` (0600 credentials); nothing committed.
 
   ```yaml
   tunnel: <TUNNEL_UUID>
@@ -575,31 +577,27 @@ Prerequisites:
     - service: http_status:404
   ```
 
-- [ ] Validate the ingress configuration and hostname match.
+- [x] Validate the ingress configuration and hostname match. `ingress validate` → OK; `ingress rule` matches rule #0 → `http://127.0.0.1:3773`.
 
   ```bash
   cloudflared tunnel ingress validate
   cloudflared tunnel ingress rule https://code.<domain>
   ```
 
-- [ ] Create the DNS CNAME route with the requested CLI flow.
+- [x] Create the DNS CNAME route. Done via DNS API instead of `route dns` (which needs `cert.pem`): `POST /zones/{id}/dns_records` CNAME `code` → `<UUID>.cfargotunnel.com`, proxied.
 
-  ```bash
-  cloudflared tunnel route dns t3-code code.<domain>
-  ```
-
-- [ ] Confirm the generated proxied CNAME points at `<TUNNEL_UUID>.cfargotunnel.com`.
+- [x] Confirm the generated proxied CNAME points at `<TUNNEL_UUID>.cfargotunnel.com`. Confirmed proxied; `code.example.com` resolves to Cloudflare edge IPs.
 
 ### 6C. Start and persist the Tunnel
 
-- [ ] Start T3 first, then run the Tunnel interactively.
+- [x] Start T3 first, then run the Tunnel interactively. T3 (`:3773`) and proxy (`:8317`) up; `cloudflared tunnel run t3-code` running, 4 QUIC connections registered (ord).
 
   ```bash
   cloudflared tunnel run t3-code
   ```
 
-- [ ] Confirm the tunnel is Healthy and the local origin does not return a 502.
-- [ ] From a private/incognito browser, visit `https://code.<domain>`. Confirm Cloudflare Access blocks the T3 response until the exact email and MFA succeed.
+- [x] Confirm the tunnel is Healthy and the local origin does not return a 502. Healthy; edge returns Access 302 (not 1033/502).
+- [ ] From a private/incognito browser, visit `https://code.<domain>`. Confirm Cloudflare Access blocks the T3 response until the exact email and MFA succeed. Edge gate confirmed via curl (302 → Access login, correct `aud`); the actual login + wrong-email rejection still need a browser test by the user.
 - [ ] Complete T3's separate one-time pairing flow. Confirm a second browser/device without a T3 session cannot use the backend even after Cloudflare login.
 - [ ] Verify a live agent response streams through the browser. T3 uses WebSockets, and Cloudflare Tunnel supports WebSockets, but the end-to-end flow still needs a real streaming test.
 - [ ] After validation, do not install a login/boot launch agent. Instead start the stack on demand with a single orchestration script (see Phase 6D). This keeps startup explicit and ordered rather than tied to login.

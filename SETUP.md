@@ -335,8 +335,47 @@ Run only one backend at a time. Pairing tokens and sessions are managed with
 
 ## Step 4 - Cloudflare tunnel + Access
 
-Status: `cloudflared 2026.7.2` installed. Nothing configured yet - no zone
-authorized to `cloudflared`, no tunnel created, no Access application.
+Status: live. Access app + policy, tunnel `t3-code`, and the proxied CNAME
+`code.example.com` are all created and the tunnel is running. Built entirely
+through the Cloudflare REST API with a scoped token instead of
+`cloudflared tunnel login`, so **no `~/.cloudflared/cert.pem` exists** — the
+account-wide, ~10-year "manage all tunnels" credential is never written. The
+tunnel is locally-managed (`config_src: local`); `cloudflared tunnel run` works
+from `config.yml` + the `<UUID>.json` credentials file alone. Edge verified:
+unauthenticated requests 302 to the Access login with the app's `aud`. Remaining:
+the browser-side checks in 4C (real login, wrong-email rejection, T3 pairing,
+streaming) plus deleting the setup token. Real IDs/secrets live only on the host
+and in Cloudflare — none in git.
+
+The API path, for reference (token was a scoped, short-lived custom token with
+`Access: Apps and Policies` edit, `Access: Organizations, IdPs, and Groups` edit,
+`Cloudflare Tunnel` edit, and zone `DNS` edit):
+
+```bash
+set -a; . ./.env; set +a
+CF=$(tr -d '[:space:]' < ~/.ssh/CloudFlare_API_KEY/cloudflare-tunnel-api.key)
+H="Authorization: Bearer $CF"
+
+# account_id from the zone; org + IdP sanity check
+curl -s "https://api.cloudflare.com/client/v4/zones?name=$(echo $T3_HOSTNAME | cut -d. -f2-)" -H "$H"
+curl -s "https://api.cloudflare.com/client/v4/accounts/$ACCT/access/organizations" -H "$H"
+
+# Access first: reusable policy, then app (auto_redirect to the one IdP)
+curl -s -X POST ".../accounts/$ACCT/access/policies" -H "$H" \
+  --data '{"name":"...","decision":"allow","include":[{"email":{"email":"'$ACCESS_EMAIL'"}}],"session_duration":"1h"}'
+curl -s -X POST ".../accounts/$ACCT/access/apps" -H "$H" \
+  --data '{"name":"T3 Code","type":"self_hosted","domain":"'$T3_HOSTNAME'","session_duration":"1h","auto_redirect_to_identity":true,"allowed_idps":["<idp>"],"policies":[{"id":"<policy>","precedence":1}]}'
+
+# Tunnel: generate secret, create local tunnel, hand-write credentials JSON
+SECRET=$(openssl rand -base64 32)
+curl -s -X POST ".../accounts/$ACCT/cfd_tunnel" -H "$H" \
+  --data '{"name":"'$TUNNEL_NAME'","config_src":"local","tunnel_secret":"'$SECRET'"}'
+#  -> ~/.cloudflared/<UUID>.json = {"AccountTag","TunnelSecret":SECRET,"TunnelID"}
+
+# DNS last (equivalent to `route dns`, no cert.pem needed)
+curl -s -X POST ".../zones/$ZONE/dns_records" -H "$H" \
+  --data '{"type":"CNAME","name":"code","content":"<UUID>.cfargotunnel.com","proxied":true,"ttl":1}'
+```
 
 Real values live in `.env` (gitignored), not in this file:
 
@@ -422,6 +461,15 @@ Independent MFA: required, 1 hour
 No `Include: Everyone`. No `Bypass` policy. No service tokens. Email OTP alone
 allows any valid address - if used, still pin the policy to the exact email.
 Test with the intended email and a different email before continuing.
+
+As built: the org's one IdP is the built-in **Cloudflare** identity provider, so
+MFA is whatever the Cloudflare account itself enforces (account 2FA is on) rather
+than a separate "Independent MFA" toggle. The AMR-based MFA policy rule only
+supports Okta/Entra/OIDC/SAML - not the Cloudflare IdP, Google, or OTP - and
+free-tier Independent MFA availability is unconfirmed, so account 2FA is the MFA
+layer here. The app pins `allowed_idps` to that one IdP with
+`auto_redirect_to_identity: true`, so there is no IdP chooser to leak other login
+methods.
 
 ### 4B. Tunnel
 

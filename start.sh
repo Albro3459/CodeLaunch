@@ -21,7 +21,7 @@ set -a; . ./.env; set +a
 
 # --- b. prereqs (collect all missing, fail once) ---
 missing=()
-for c in docker cloudflared claude claudex npx; do
+for c in docker cloudflared claude claudex npx jq; do
   command -v "$c" >/dev/null 2>&1 || missing+=("$c")
 done
 if [ "${#missing[@]}" -gt 0 ]; then
@@ -140,9 +140,9 @@ echo "ensuring T3 backend + minting pairing token ..."
 # --- i. summary ---
 cat <<EOF
 
---- up ---
+--- operational details ---
 main URL:   https://$T3_HOSTNAME  (Cloudflare Access, then T3 pairing)
 logs:       /tmp/cloudflared-t3.log   /tmp/t3-serve.log
-note:       the pair token above is one-time and short-lived - treat it like a password.
-            open the Pair URL / paste the token in a browser that has passed Access.
+pairing:    ready; scroll up to T3 PAIRING for the code, full URL, and QR.
+expires:    the pairing code lasts $TTL.
 EOF

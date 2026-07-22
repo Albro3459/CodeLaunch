@@ -1,6 +1,6 @@
 # Quick Setup
 
-Day-to-day start/stop. Full docs: `SETUP.md`.
+Day-to-day start/stop. Full docs: [SETUP.md](SETUP.md).
 
 ## One-time Mac prep
 
@@ -21,9 +21,9 @@ without `caffeinate`, it stops.
 ./start.sh 5m         # custom TTL
 ```
 
-Open the printed Pair URL (or paste the token) in a phone browser after passing
-Cloudflare Access. If the Codex token is expired, `start.sh` auto-launches the
-browser login first. Otherwise it reuses everything.
+Either open the Pair URL, navigate to your URL directly and paste the token, or scan the QR code with a phone camera.
+
+If the Codex sign-in has expired, `start.sh` opens the browser login first, otherwise it reuses the running services.
 
 ## Stop
 

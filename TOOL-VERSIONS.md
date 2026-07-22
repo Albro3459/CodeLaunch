@@ -1,6 +1,6 @@
 # Tool versions
 
-As tested and working together, recorded 2026-07-21.
+As tested and working together, recorded 2026-07-22.
 
 | Tool | Version |
 | --- | --- |
@@ -14,6 +14,8 @@ As tested and working together, recorded 2026-07-21.
 | t3 CLI (`npx t3@$T3_CHANNEL`) | 0.0.28 (`latest`) / 0.0.29-nightly.20260722.877 (`nightly`) |
 | Node | v24.18.0 |
 | npm | 11.16.0 |
+| jq | 1.8.1 |
+| qrencode | 4.1.1 |
 
 Notes:
 

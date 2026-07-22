@@ -1,10 +1,10 @@
 # Setup
 
-Setup and command reference for this project. See `TODO/TODO.md` for the full rationale.
+Setup and command reference for this project.
 
 ## Day-to-day
 
-Start and stop the whole stack with `./start.sh` and `./stop.sh` (`QUICK-SETUP.md`
+Start and stop the whole stack with `./start.sh` and `./stop.sh` ([QUICK-SETUP.md](QUICK-SETUP.md)
 for the short version, "Step 5" below for the mechanics). Always-on requires
 power, `caffeinate -dims`, Remote Login, and Wake for network access. `start.sh`
 starts `caffeinate` for you but cannot flip Wake for network access - enable it
@@ -588,8 +588,12 @@ The desktop `.app` is only a GUI - the backend is the same `t3` server it spawns
 runnable headless with `t3 serve --host 127.0.0.1`. Pairing tokens are issued by
 the CLI against the shared `~/.t3` auth store (default `T3CODE_HOME`), so they
 validate whichever single backend is listening. `./t3-pair.sh` wraps this: it
-reuses an existing backend or starts a headless one, refuses to proceed if the
-port is on `0.0.0.0`, and prints a token plus a ready `/pair#token=...` link.
+reuses an existing backend or starts a headless one, refuses to proceed unless
+all listeners are on loopback, and prints a structured pairing block with the code,
+complete URL, expiration, and an optional terminal QR. `jq` is required for
+that structured output; install it with `brew install jq`. `qrencode` is
+recommended but optional (`brew install qrencode`); pairing still succeeds
+without it or if QR rendering fails.
 
 ```bash
 ./t3-pair.sh            # 15m token (default)
@@ -608,7 +612,8 @@ tested while the desktop app owns the port, so test it with the app closed.
 check and idempotent so a live stack short-circuits to reuse:
 
 1. **prereqs** - `.env` loaded. `docker`, `cloudflared`, `claude`, `claudex`,
-   `npx` all checked on PATH (all missing reported at once).
+   `npx`, and required `jq` all checked on PATH (all missing reported at once);
+   `qrencode` remains optional for terminal QR rendering.
 2. **caffeinate** - warns (not fails) off AC power, and starts `caffeinate -dims`
    if none is running. It cannot enable Wake for network access - that stays a
    manual `pmset`/System Settings step (`pmset -g | grep womp` must read `1`).

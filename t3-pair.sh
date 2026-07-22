@@ -88,6 +88,12 @@ fi
 # Callers that only want the guard, like start.sh's pre-flight check, stop here before anything starts.
 if [ "$CHECK_ONLY" = 1 ]; then exit 0; fi
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "missing required dependency: jq"
+  echo "Install it with: brew install jq"
+  exit 1
+fi
+
 if listening >/dev/null; then
   echo "T3 backend already listening on :$T3_PORT (reusing)"
 else
@@ -101,14 +107,62 @@ else
   echo "backend up"
 fi
 
-# Never expose beyond loopback, since the tunnel connects from localhost and 0.0.0.0 would put the backend on the LAN.
-if listening | grep -q '0.0.0.0'; then
-  echo "REFUSING: backend is bound to 0.0.0.0, not loopback. Fix before pairing."
+# The tunnel only needs a local backend. Refuse any listener outside loopback.
+non_loopback=$(listening | tail -n +2 | grep -vE '(^|[[:space:]])(127\.0\.0\.1|\[::1\]|::1):' || true)
+if [ -n "$non_loopback" ]; then
+  echo "REFUSING: backend is not bound exclusively to loopback. Fix before pairing."
+  echo "$non_loopback"
   exit 1
 fi
 
 echo "minting pairing token (ttl $TTL) ..."
-npx --yes "$PKG" auth pairing create \
+if ! pairing_json=$(npx --yes "$PKG" auth pairing create \
   --ttl "$TTL" \
   --label "cloudflare-browser" \
-  --base-url "https://$T3_HOSTNAME" 2>&1 | grep -vE 'INFO|Migrations'
+  --base-url "https://$T3_HOSTNAME" \
+  --json); then
+  echo "T3 pairing command failed."
+  exit 1
+fi
+
+if ! printf '%s' "$pairing_json" | jq -e '
+  type == "object" and
+  (.credential | type == "string" and length > 0) and
+  (.pairUrl | type == "string" and length > 0) and
+  (.expiresAt | (type == "string" or type == "number"))
+' >/dev/null 2>&1; then
+  echo "T3 pairing command returned invalid or incomplete JSON."
+  echo "Expected credential, pairUrl, and expiresAt fields."
+  exit 1
+fi
+
+credential=$(printf '%s' "$pairing_json" | jq -r '.credential')
+pair_url=$(printf '%s' "$pairing_json" | jq -r '.pairUrl')
+expires_at=$(printf '%s' "$pairing_json" | jq -r '.expiresAt')
+
+cat <<EOF
+
+============================================================
+T3 PAIRING
+============================================================
+CODE:       $credential
+PAIR URL:   $pair_url
+EXPIRES:    $expires_at
+
+If the QR code does not scan, open the full Pair URL above.
+QR CODE:
+
+EOF
+if command -v qrencode >/dev/null 2>&1; then
+  if ! printf '%s' "$pair_url" | qrencode -t ANSIUTF8 -o -; then
+    echo "(QR rendering failed; use the complete Pair URL above.)"
+  fi
+else
+  echo "(qrencode not installed; use the complete Pair URL above.)"
+fi
+cat <<'EOF'
+
+============================================================
+WARNING: This is a one-time secret. Treat the code and URL like a password.
+============================================================
+EOF

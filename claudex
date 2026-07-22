@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Launch Claude Code against CLIProxyAPI (GPT models) with the isolated
-# ~/.claudex profile. Runs in the current working directory.
-# Usage: claudex [claude args]   e.g.  claudex --model opus --effort low
+# Run Claude Code through CLIProxyAPI with separate settings in ~/.claudex.
+# Uses the current directory.
+# Usage: claudex [claude args]   Example: claudex --model opus --effort low
 set -euo pipefail
 
 # Resolve symlinks so the repo is found when invoked via ~/.local/bin/claudex
@@ -20,14 +20,12 @@ if [ -z "$KEY" ] && [ -f "$CONFIG" ]; then
 fi
 [ -z "$KEY" ] && { echo "No local API key. Set CLIPROXY_LOCAL_API_KEY or add it to $CONFIG"; exit 1; }
 
-# GUI launchers (T3) spawn without a login PATH, so fall back to the known path
+# T3 may not load the shell PATH, so use the standard install path as a fallback.
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
 
-# Role mapping below: each *_MODEL is the routing key and must match an `alias:`
-# in cliproxy/config.yaml (or example.config.yaml in a fresh clone) byte-for-byte
-# - the spaces in 'GPT 5.5' and 'GPT 5.4 mini' are required. *_MODEL_NAME is
-# display only. Mismatch = 502 unknown provider, which Claude Code retries as if
-# it were transient.
+# Each *_MODEL value must exactly match an alias in the proxy config.
+# Keep the spaces in "GPT 5.5" and "GPT 5.4 mini". *_MODEL_NAME only controls
+# the displayed name. A mismatch causes a 502 error and repeated retries.
 exec env -u ANTHROPIC_API_KEY \
   CLAUDE_CONFIG_DIR="$HOME/.claudex" \
   ANTHROPIC_BASE_URL=http://127.0.0.1:8317 \

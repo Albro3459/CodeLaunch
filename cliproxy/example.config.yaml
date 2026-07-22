@@ -17,24 +17,24 @@ auth-dir: "/root/.cli-proxy-api"
 # logging-to-file: true
 # request-log: true
 
-api-keys:
-  - "REPLACE_WITH_LOCAL_API_KEY"
-
 # Aliasing REPLACES the upstream id: once gpt-5.6-luna is aliased, that raw id
 # stops resolving and only the alias names route. Unaliased upstream models
-# keep their own ids. One upstream id may carry MANY aliases and they all
-# coexist, which is what lets both blocks below point at the same models.
+# (gpt-5.4, gpt-5.6-terra) keep their own ids.
 #
-# The friendly names must stay in sync with ANTHROPIC_DEFAULT_*_MODEL in
-# ../claudex or role lookups fail with a misleading "502 unknown provider"
-# that Claude Code retries as if it were transient. An alias differing from
-# the upstream id only by case is silently ignored with nothing logged - hence
-# the spaces, including in "GPT 5.5".
+# One upstream id may carry MANY aliases, and they all coexist - verified
+# against /v1/models, which lists every name below. That is what lets the
+# friendly names and the claude-* slugs point at the same models at once.
+#
+# The names here must stay in sync with ANTHROPIC_DEFAULT_*_MODEL in ../claudex
+# or role lookups fail with a misleading "502 unknown provider" that Claude Code
+# retries as if it were transient. They do NOT need to match customModels in
+# ~/.t3/userdata/settings.json - see the T3 note below.
+#
+# An alias that differs from the upstream id only by case is silently ignored,
+# with the original left in place and nothing logged. Every alias below must
+# differ by an actual character - hence the spaces, including in "GPT 5.5".
 oauth-model-alias:
   codex:
-    # Friendly names: required by the ANTHROPIC_DEFAULT_*_MODEL role mappings
-    # in ../claudex. Removing these breaks standalone claudex. They are also
-    # the only labels that honestly say which model is serving you.
     - name: "gpt-5.6-sol"
       alias: "GPT-5.6 Sol"
     - name: "gpt-5.6-luna"
@@ -57,7 +57,9 @@ oauth-model-alias:
     #
     # Tradeoff: under these slugs the model believes it is Claude (the system
     # prompt says so and the id agrees), so asking it what it is returns a
-    # confident wrong answer. The proxy logs are the only ground truth.
+    # confident wrong answer, and model-conditional logic misfires toward
+    # Claude. The proxy logs are the only ground truth. Unavoidable if T3 is
+    # to pass effort at all.
     #
     # The [1m] variants cover T3's 1M context-window toggle, which appends
     # "[1m]" to the model id. Haiku 4.5 has no effort selector in T3, only a
@@ -77,24 +79,36 @@ oauth-model-alias:
     - name: "gpt-5.6-luna"
       alias: "claude-opus-4-5"
     - name: "gpt-5.5"
+      alias: "claude-sonnet-5"
+    - name: "gpt-5.5"
+      alias: "claude-sonnet-5[1m]"
+    - name: "gpt-5.5"
       alias: "claude-sonnet-4-6"
     - name: "gpt-5.5"
       alias: "claude-sonnet-4-6[1m]"
     - name: "gpt-5.4-mini"
       alias: "claude-haiku-4-5"
 
-# NOTE: this block is a verified NO-OP, kept only as documentation of intent.
-# `default` fills reasoning.effort only when the client omits it, but the
-# /v1/messages -> codex translation always derives a level first, so there is
-# nothing left to fill. Confirmed with debug: true - a request with no thinking
-# field arrives as medium and stays medium despite the high baseline below.
-# Effort is controlled by the client, not the proxy.
+api-keys:
+  - "REPLACE_WITH_LOCAL_API_KEY"
+
+# NOTE: this block is currently a NO-OP and is kept only as documentation of
+# intent. `default` fills reasoning.effort only when the client omits it, but
+# the /v1/messages -> codex translation always derives a level first, so there
+# is nothing to fill. Verified with debug: true - a request with no thinking
+# field arrives as level=medium, and Luna still logged medium despite the high
+# baseline below. A small thinking budget arrives as level=low and passes
+# through, so effort is effectively controlled by the client (Claude Code's
+# /effort and per-agent frontmatter), not by the proxy.
 #
 # Do NOT "fix" this with `override` - that force-replaces client values and
 # would break per-agent effort. Names here must be the upstream ids, not the
 # oauth-model-alias values; matching happens after alias resolution.
 payload:
   default:
+    # Both the alias and the upstream name are listed because it is unverified
+    # whether matching happens before or after alias resolution. The one that
+    # does not match is simply inert.
     - models:
         - name: "gpt-5.6-sol"
           protocol: "codex"

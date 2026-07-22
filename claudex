@@ -23,6 +23,11 @@ fi
 # GUI launchers (T3) spawn without a login PATH, so fall back to the known path
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
 
+# Role mapping below: each *_MODEL is the routing key and must match an `alias:`
+# in cliproxy/config.yaml (or example.config.yaml in a fresh clone) byte-for-byte
+# - the spaces in 'GPT 5.5' and 'GPT 5.4 mini' are required. *_MODEL_NAME is
+# display only. Mismatch = 502 unknown provider, which Claude Code retries as if
+# it were transient.
 exec env -u ANTHROPIC_API_KEY \
   CLAUDE_CONFIG_DIR="$HOME/.claudex" \
   ANTHROPIC_BASE_URL=http://127.0.0.1:8317 \

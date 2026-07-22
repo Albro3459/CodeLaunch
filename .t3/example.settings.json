@@ -1,4 +1,5 @@
 {
+  "enableAssistantStreaming": true,
   "addProjectBaseDirectory": "~/GitHub",
   "textGenerationModelSelection": {
     "instanceId": "claudeAgent",

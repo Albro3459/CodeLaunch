@@ -1,6 +1,12 @@
 services:
   cliproxyapi:
-    image: eceasy/cli-proxy-api:latest
+    # Pinned by digest, not a tag: tags are mutable upstream, so `latest` (or
+    # even a version tag) can silently change routing behavior on the next pull.
+    # This digest is v7.2.92 (commit 53c1e7e, built 2026-07-20) — the build the
+    # model aliases and effort handling in config.yaml were tested against.
+    # To move: pull the new image, confirm /v1/models and effort still behave,
+    # then update the digest here and the version in TOOL-VERSIONS.md together.
+    image: eceasy/cli-proxy-api@sha256:af18f6fb364bfb7b482a1ca6c6c85fd7df2c0d6a3a497ebb82c337ac2216dc41
     container_name: cliproxyapi
     restart: unless-stopped
     ports:

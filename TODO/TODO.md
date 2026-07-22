@@ -10,13 +10,11 @@ daily use from off-network devices.
 - [ ] Verify `start.sh`'s headless path end to end: with the Desktop app fully
   quit, let the script start `t3 serve` and confirm remote pairing + streaming
   work the same. Only the reuse path (Desktop already running) is verified.
-- [ ] Delete or rotate the Cloudflare setup API token (expires 2027-07-01; can
-  create tunnels and edit Access/DNS). It lives at
-  `~/.ssh/CloudFlare_API_KEY/cloudflare-tunnel-api.key`, chmod 600. Nothing
-  running needs it day to day.
-- [ ] Pin the CLIProxyAPI image to a version tag or digest instead of
+- [x] Pin the CLIProxyAPI image to a version tag or digest instead of
   `eceasy/cli-proxy-api:latest` (currently resolves to `v7.2.92`) so an
-  upstream push cannot silently change routing behavior.
+  upstream push cannot silently change routing behavior. Pinned by digest
+  (`sha256:af18f6fb364bfb7b482a1ca6c6c85fd7df2c0d6a3a497ebb82c337ac2216dc41`, v7.2.92) — digest over tag because tags stay
+  mutable upstream.
 
 ## Recurring
 
@@ -31,12 +29,6 @@ daily use from off-network devices.
   on-host only (`./cliproxy/login.sh`, browser callback on `1455`).
 - [ ] Keep the examples in sync with live config: `cliproxy/example.config.yaml`
   with `config.yaml`, `.t3/example.*.json` with `~/.t3/userdata/`.
-
-## Maybe later
-
-- [ ] Standalone Codex CLI (would enable T3's native Codex provider and the
-  official Codex plugin). Not needed for the proxy-backed setup.
-- [ ] Revisit the 1h Access/policy session durations after real use.
 
 ## Settled (do not reopen)
 

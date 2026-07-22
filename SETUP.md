@@ -50,6 +50,8 @@ docker compose -f cliproxy/docker-compose.yml logs --tail=30
 
 Status: proxy up on `127.0.0.1:8317`, Codex login OK, all four models confirmed via `/v1/models` (CLIProxyAPI `v7.2.92`, ChatGPT Plus). Inference verified through every model and every role.
 
+The image is pinned by digest in `docker-compose.yml` rather than by `latest` or a version tag, since tags are mutable upstream and a silent pull could change routing behavior. Check the running build with `docker exec cliproxyapi ./CLIProxyAPI --version`; to move, pull the new image, re-verify `/v1/models` and effort, then update the digest and `TOOL-VERSIONS.md` together.
+
 Models are exposed under two sets of aliases (`oauth-model-alias`), and the raw upstream ids no longer route:
 
 - **Friendly names** — `GPT-5.6 Sol`, `GPT-5.6 Luna`, `GPT 5.5`, `GPT 5.4 mini`. Required by the `ANTHROPIC_DEFAULT_*_MODEL` role mappings in `claudex`, and the only labels that honestly report which model is serving you.

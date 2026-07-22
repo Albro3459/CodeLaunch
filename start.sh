@@ -29,6 +29,11 @@ if [ "${#missing[@]}" -gt 0 ]; then
   echo "missing prerequisites on PATH: ${missing[*]}"; exit 1
 fi
 
+# T3_CHANNEL must match the installed desktop app — the CLI migrates the shared
+# ~/.t3 store. Checked here, before Docker/proxy/tunnel come up, so a mismatch
+# fails in a second instead of after a full bring-up. Same guard t3-pair.sh runs.
+./t3-pair.sh --check-only
+
 # --- c. power + keep-awake ---
 if pmset -g batt | grep -q 'AC Power'; then
   echo "on AC power"

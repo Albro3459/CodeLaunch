@@ -36,9 +36,10 @@ Leaves Docker Desktop and native Claude Code running.
 ## Useful
 
 ```bash
-npx t3@nightly auth session list      # active device sessions
-npx t3@nightly auth pairing list      # outstanding pairing tokens
-npx t3@nightly auth pairing revoke <id>   # kill one
+. ./.env                             # T3_CHANNEL must match the desktop app
+npx "t3@$T3_CHANNEL" auth session list      # active device sessions
+npx "t3@$T3_CHANNEL" auth pairing list      # outstanding pairing tokens
+npx "t3@$T3_CHANNEL" auth pairing revoke <id>   # kill one
 ./cliproxy/login.sh                  # manual Codex re-auth (on-host, browser)
 ```
 

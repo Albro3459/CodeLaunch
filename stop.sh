@@ -28,13 +28,33 @@ else
 fi
 
 # --- c. T3 backend on $T3_PORT ---
+# The desktop app gets a graceful AppleScript quit; a headless `t3 serve` gets a
+# signal. The app's real bundle name is read back out of the process path rather
+# than assumed from T3_CHANNEL, so a stale channel setting can never turn the
+# graceful quit into a kill.
 t3_pid=$(lsof -nP -iTCP:"$T3_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)
+t3_cmd=$(ps -p "${t3_pid:-0}" -o command= 2>/dev/null || true)
+# Strip at the FIRST ".app/": Electron helpers live in nested bundles
+# (Foo.app/Contents/Frameworks/Foo Helper.app/...), and quitting the helper's
+# name is a no-op — only the outermost bundle answers to `quit app`.
+app_name=""
+case "$t3_cmd" in
+  *.app/Contents/*) app_name=$(basename "${t3_cmd%%.app/*}") ;;
+esac
 if [ -z "$t3_pid" ]; then
   echo "no T3 backend listening on :$T3_PORT"
-elif ps -p "$t3_pid" -o command= 2>/dev/null | grep -q "T3 Code"; then
-  echo "quitting T3 Desktop app (PID $t3_pid) ..."
-  osascript -e 'quit app "T3 Code (Nightly)"' || true
-  echo "T3 Desktop quit requested"
+elif [ -n "$app_name" ]; then
+  echo "quitting T3 Desktop app \"$app_name\" (PID $t3_pid) ..."
+  osascript -e "quit app \"$app_name\"" || true
+  for _ in $(seq 1 15); do
+    kill -0 "$t3_pid" 2>/dev/null || break
+    sleep 1
+  done
+  if kill -0 "$t3_pid" 2>/dev/null; then
+    echo "WARNING: \"$app_name\" still running after 15s — it may be showing a dialog. Quit it manually."
+  else
+    echo "T3 Desktop quit"
+  fi
 else
   echo "stopping headless T3 backend (PID $t3_pid) ..."
   kill "$t3_pid" 2>/dev/null || true

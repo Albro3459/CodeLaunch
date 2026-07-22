@@ -95,13 +95,13 @@ Add the launcher to your shell once. Example for `~/.zshrc` (pick one):
 
 ```zsh
 # Option A: alias
-alias claudex="$HOME/GitHub/Code/claudex"
+alias claudex="$HOME/GitHub/CodeLaunch/claudex"
 
 # Option B: put the repo dir on PATH
-export PATH="$HOME/GitHub/Code:$PATH"
+export PATH="$HOME/GitHub/CodeLaunch:$PATH"
 
 # Option C: symlink into a dir already on PATH (no zshrc edit)
-#   ln -s "$HOME/GitHub/Code/claudex" ~/.local/bin/claudex
+#   ln -sfn "$HOME/GitHub/CodeLaunch/claudex" ~/.local/bin/claudex
 ```
 
 Reload with `source ~/.zshrc`. Then, with the proxy up (`cliproxy/start.sh`),
@@ -135,7 +135,7 @@ Install the desktop app and confirm the CLI entrypoint:
 
 ```bash
 brew install --cask t3-code
-npx --yes t3@nightly --version
+npx --yes t3@latest --version
 ```
 
 Status: `t3-code` `0.0.29-nightly.20260721.864` installed as
@@ -144,14 +144,44 @@ the app as `legacyUserDataDirName`, so it still shows up as a userdata directory
 Cask has `auto_updates` on, so re-check the version and backend port after it
 updates.
 
-**Use `t3@nightly`, not `t3@latest`.** The cask installs the nightly desktop
-build, and npm carries a matching `nightly` dist-tag (`npm view t3 dist-tags`);
-`latest` trails it by a minor version (`0.0.28` vs `0.0.29-nightly.*`). Both the
-CLI and the desktop backend share the `~/.t3` store and the CLI runs schema
-migrations against it, so an older stable CLI against a newer nightly backend is
-the skew worth avoiding. Every `npx` call here and in `t3-pair.sh` pins
-`t3@nightly` for that reason. If the cask is ever switched to a stable channel,
-flip these back together.
+**`T3_CHANNEL` must match the installed desktop app — this is enforced, not
+advisory.** The CLI and the desktop backend share the `~/.t3` store and the CLI
+runs schema migrations against it, so a mismatch can migrate the store to a
+schema the other side cannot read.
+
+`t3-pair.sh` reads `T3_CHANNEL` from `.env` (`latest` | `nightly`, default
+`latest`), uses it for every `npx t3@<channel>` call, and **refuses to run on a
+mismatch**:
+
+```
+REFUSING: T3_CHANNEL=latest but the desktop app is 'nightly'.
+  app:  /Applications/T3 Code (Nightly).app
+  Fix: set T3_CHANNEL=nightly in .env, or install the latest cask.
+```
+
+The channel is read from the app's `CFBundleShortVersionString`
+(`0.0.29-nightly.*` -> nightly), not its bundle name, so a renamed `.app` is
+still classified correctly. Detection prefers the app currently listening on
+`T3_PORT` — the backend the CLI will actually migrate against — and falls back
+to scanning `/Applications` and `~/Applications` when nothing is up. With no
+desktop app installed there is nothing to match, and `T3_CHANNEL` simply selects
+the headless backend's channel. Escape hatch, which warns loudly:
+`T3_CHANNEL_SKIP_CHECK=1`.
+
+`start.sh` runs the same guard as `./t3-pair.sh --check-only` in its prereq step
+— before Docker, the proxy, or the tunnel start — so a mismatch fails in a
+second rather than after a full bring-up. `--check-only` starts no backend and
+mints no token.
+
+`stop.sh` deliberately does **not** check the channel. Teardown has to work when
+the config is wrong, and it never invokes the CLI, so there are no migrations to
+guard. It reads the desktop app's bundle name back out of the running process
+and is correct regardless of `T3_CHANNEL`.
+
+npm carries both dist-tags (`npm view t3 dist-tags`); as of writing `latest` is
+`0.0.28` and `nightly` is `0.0.29-nightly.*`. This machine runs the nightly cask,
+so its `.env` has `T3_CHANNEL=nightly`; `.env.example` ships `latest` because a
+fresh setup should use the stable channel.
 
 Configure two providers in T3 Desktop.
 
@@ -345,7 +375,7 @@ Network access off. Re-check after a cask auto-update. If this ever shows
 Headless fallback, if Desktop's managed backend does not work out:
 
 ```bash
-npx --yes t3@nightly serve --host 127.0.0.1
+npx --yes t3@latest serve --host 127.0.0.1
 ```
 
 Run only one backend at a time. Pairing tokens and sessions are managed with
@@ -460,7 +490,7 @@ up after authenticating: expect Cloudflare error 1033 when no tunnel is running
 or the hostname is misrouted, and a 502 only once the tunnel is up but the origin
 port is dead. Start Desktop (or the headless backend) first and confirm with
 `lsof` as in Step 3. The headless entrypoint is
-`npx --yes t3@nightly serve --host 127.0.0.1`; **not yet verified** - the CLI
+`npx --yes t3@latest serve --host 127.0.0.1`; **not yet verified** - the CLI
 entrypoint check is still unchecked in `TODO/TODO.md` (Phase 5), so treat that
 command as unconfirmed until it is run.
 

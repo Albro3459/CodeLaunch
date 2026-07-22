@@ -7,9 +7,9 @@ Day-to-day start/stop. Full docs: `SETUP.md`.
 - Plug into power (required).
 - System Settings -> General -> Sharing -> **Remote Login** ON.
 - System Settings -> Battery -> Options -> **Wake for network access**: "Only on
-  power adapter" is fine — the setting is per power source.
-- Verify while plugged in: `pmset -g | grep womp` shows `1` (reads `0` on battery
-  by design; always-on requires AC anyway).
+  power adapter" is fine - the setting is per power source.
+- Verify while plugged in: `pmset -g | grep womp` shows `1`. On battery it
+  shows `0` - fine, since always-on needs AC anyway.
 
 After that you can lock the screen and close the lid - tested. On battery, or
 without `caffeinate`, it stops.
@@ -23,7 +23,7 @@ without `caffeinate`, it stops.
 
 Open the printed Pair URL (or paste the token) in a phone browser after passing
 Cloudflare Access. If the Codex token is expired, `start.sh` auto-launches the
-browser login first; otherwise it reuses everything.
+browser login first. Otherwise it reuses everything.
 
 ## Stop
 

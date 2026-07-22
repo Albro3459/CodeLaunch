@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Bring the remote-agent stack up in the right order, reusing whatever is already
-# running, and print a one-time T3 pairing token + the main URL.
+# Brings the remote-agent stack up, reusing whatever is already running.
+# Prints a one-time T3 pairing token and the main URL when done.
 #
 #   ./start.sh            # 15m pairing token (default)
 #   ./start.sh 5m         # custom TTL, passed to t3-pair.sh
 #
-# Order: prereqs -> caffeinate -> Docker -> Codex token -> proxy -> tunnel ->
-# T3 backend + token. Each step is idempotent; a live stack short-circuits to
-# reuse paths. See SETUP.md "Step 5" and QUICK-SETUP.md.
+# Order: prereqs, caffeinate, Docker, Codex token, proxy, tunnel, T3 backend + token.
+# See SETUP.md "Step 5" and QUICK-SETUP.md.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -29,16 +28,14 @@ if [ "${#missing[@]}" -gt 0 ]; then
   echo "missing prerequisites on PATH: ${missing[*]}"; exit 1
 fi
 
-# T3_CHANNEL must match the installed desktop app — the CLI migrates the shared
-# ~/.t3 store. Checked here, before Docker/proxy/tunnel come up, so a mismatch
-# fails in a second instead of after a full bring-up. Same guard t3-pair.sh runs.
+# T3_CHANNEL must match the installed desktop app, checked early so a mismatch fails fast instead of after a full bring-up.
 ./t3-pair.sh --check-only
 
 # --- c. power + keep-awake ---
 if pmset -g batt | grep -q 'AC Power'; then
   echo "on AC power"
 else
-  echo "WARNING: not on AC power — sleep assertions release when unplugged (see QUICK-SETUP.md)"
+  echo "WARNING: not on AC power - sleep assertions release when unplugged (see QUICK-SETUP.md)"
 fi
 if pgrep -f 'caffeinate -dims' >/dev/null; then
   echo "caffeinate -dims already running (reusing)"
@@ -52,8 +49,7 @@ if docker info >/dev/null 2>&1; then
   echo "docker up"
 else
   echo "starting Docker Desktop ..."
-  # --help is the robust existence guard: `docker desktop status` can exit
-  # non-zero simply because Desktop is stopped, which is exactly this case.
+  # --help just checks the docker desktop CLI exists, since status can exit non-zero when Desktop is simply stopped.
   if docker desktop --help >/dev/null 2>&1; then
     docker desktop start --timeout 120 || true
   else
@@ -96,7 +92,7 @@ else
 fi
 if [ "$need_login" = 1 ]; then
   if [ -t 0 ]; then
-    echo "codex token missing or expired — launching ./cliproxy/login.sh (opens the host browser) ..."
+    echo "codex token missing or expired - launching ./cliproxy/login.sh (opens the host browser) ..."
     ./cliproxy/login.sh
     newest_codex=$(ls -t cliproxy/auth/codex-*.json 2>/dev/null | head -1 || true)
     if [ -n "$newest_codex" ] && rem=$(codex_remaining "$newest_codex"); then
@@ -105,7 +101,7 @@ if [ "$need_login" = 1 ]; then
       echo "still no valid codex token after login"; exit 1
     fi
   else
-    echo "codex token missing or expired and no TTY — run ./cliproxy/login.sh on the host"; exit 1
+    echo "codex token missing or expired and no TTY - run ./cliproxy/login.sh on the host"; exit 1
   fi
 fi
 
@@ -114,14 +110,12 @@ echo "starting proxy ..."
 ./cliproxy/start.sh
 KEY=$(grep -oE '[0-9a-f]{64}' cliproxy/config.yaml | head -1)
 if ! curl -fsS -H "Authorization: Bearer $KEY" http://127.0.0.1:8317/v1/models >/dev/null 2>&1; then
-  echo "proxy up but local API key rejected — check cliproxy/config.yaml"; exit 1
+  echo "proxy up but local API key rejected - check cliproxy/config.yaml"; exit 1
 fi
 echo "proxy up and key accepted"
 
 # --- g. tunnel ---
-# Bringing the tunnel up before the T3 backend deviates from SETUP's "T3 first"
-# ordering only by the seconds until step h; Access fronts the hostname and
-# t3-pair.sh starts the backend next, so the printed pair link is usable at once.
+# Tunnel comes up before the T3 backend so the pair link works right away.
 if pgrep -f "cloudflared tunnel run" >/dev/null; then
   echo "tunnel already running (reusing)"
 else
@@ -149,6 +143,6 @@ cat <<EOF
 --- up ---
 main URL:   https://$T3_HOSTNAME  (Cloudflare Access, then T3 pairing)
 logs:       /tmp/cloudflared-t3.log   /tmp/t3-serve.log
-note:       the pair token above is one-time and short-lived — treat it like a password.
+note:       the pair token above is one-time and short-lived - treat it like a password.
             open the Pair URL / paste the token in a browser that has passed Access.
 EOF

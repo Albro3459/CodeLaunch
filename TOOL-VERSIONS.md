@@ -17,18 +17,15 @@ As tested and working together, recorded 2026-07-21.
 
 Notes:
 
-- The CLI dist-tag comes from `T3_CHANNEL` in `.env` (`.env.example` ships
-  `latest`; this machine runs the nightly cask, so its `.env` is `nightly`). The
-  channel is required to match the installed desktop app — `start.sh` and
-  `t3-pair.sh` enforce it and refuse to run on a mismatch, since both sides share
-  the `~/.t3` store and the CLI migrates its schema. Nightly moves daily —
-  versions above are whatever `npm view t3 dist-tags` returned when recorded.
-- The `t3-code` cask auto-updates; re-record its version (and re-check the
+- The CLI dist-tag comes from `T3_CHANNEL` in `.env` and must match the
+  installed desktop app - `start.sh` and `t3-pair.sh` enforce this since both
+  sides share the `~/.t3` store and the CLI migrates its schema. Nightly moves
+  daily, so versions above are whatever `npm view t3 dist-tags` returned when
+  recorded.
+- The `t3-code` cask auto-updates. Re-record its version (and re-check the
   backend port/binding) after updates.
-- CLIProxyAPI is pinned by digest in `cliproxy/docker-compose.yml`, not by a tag
-  — tags are mutable upstream, so `latest` (or a version tag) could change
-  routing behavior on any pull. The digest is the build the model aliases and
-  effort handling were tested against. To move: pull the new image, re-verify
-  `/v1/models` and effort, then update the digest and the version here together.
-  Read the running build with
+- CLIProxyAPI is pinned by digest in `cliproxy/docker-compose.yml` since tags
+  are mutable and could change routing behavior on a pull. To move: pull the
+  new image, re-verify `/v1/models` and effort, update the digest and version
+  together, and check the running build with
   `docker exec cliproxyapi ./CLIProxyAPI --version`.

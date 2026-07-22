@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Tear the remote-agent stack down in reverse order. Every kill is guarded so a
-# re-run is a clean no-op. Deliberately leaves Docker Desktop, the Docker daemon,
-# and native (non-claudex) Claude Code sessions running. See SETUP.md "Step 5".
+# Tears the remote-agent stack down in reverse order and guards each kill so a re-run is a clean no-op.
+# Leaves Docker Desktop, the daemon, and native Claude Code sessions running - see SETUP.md "Step 5" for details.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -19,7 +18,7 @@ if pgrep -f "cloudflared tunnel run" >/dev/null; then
     sleep 1
   done
   if pgrep -f "cloudflared tunnel run" >/dev/null; then
-    echo "tunnel still up after grace — sending second signal"
+    echo "tunnel still up after grace - sending second signal"
     pkill -f "cloudflared tunnel run" || true
   fi
   echo "tunnel stopped"
@@ -28,15 +27,12 @@ else
 fi
 
 # --- c. T3 backend on $T3_PORT ---
-# The desktop app gets a graceful AppleScript quit; a headless `t3 serve` gets a
-# signal. The app's real bundle name is read back out of the process path rather
-# than assumed from T3_CHANNEL, so a stale channel setting can never turn the
-# graceful quit into a kill.
+# The desktop app gets a graceful AppleScript quit, while a headless `t3 serve` just gets killed.
+# The bundle name comes from the process path, not T3_CHANNEL, so a stale setting can't break the quit.
 t3_pid=$(lsof -nP -iTCP:"$T3_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)
 t3_cmd=$(ps -p "${t3_pid:-0}" -o command= 2>/dev/null || true)
-# Strip at the FIRST ".app/": Electron helpers live in nested bundles
-# (Foo.app/Contents/Frameworks/Foo Helper.app/...), and quitting the helper's
-# name is a no-op — only the outermost bundle answers to `quit app`.
+# Strips at the first ".app/" to get the outermost bundle.
+# Nested Electron helper bundles won't respond to `quit app`, only the outer one will.
 app_name=""
 case "$t3_cmd" in
   *.app/Contents/*) app_name=$(basename "${t3_cmd%%.app/*}") ;;
@@ -51,7 +47,7 @@ elif [ -n "$app_name" ]; then
     sleep 1
   done
   if kill -0 "$t3_pid" 2>/dev/null; then
-    echo "WARNING: \"$app_name\" still running after 15s — it may be showing a dialog. Quit it manually."
+    echo "WARNING: \"$app_name\" still running after 15s - it may be showing a dialog. Quit it manually."
   else
     echo "T3 Desktop quit"
   fi
@@ -67,8 +63,7 @@ else
 fi
 
 # --- d. claudex Claude sessions only ---
-# Match the CLAUDE_CONFIG_DIR marker in the process ENVIRONMENT (ps eww appends
-# it) so native Claude Code sessions, which lack it, are never touched.
+# Matches the CLAUDE_CONFIG_DIR marker in the process environment so native Claude Code sessions are left alone.
 marker="CLAUDE_CONFIG_DIR=$HOME/.claudex"
 claudex_pids=$(ps eww -ax -o pid=,command= 2>/dev/null \
   | grep -F "$marker" | grep -E '/claude( |$)' | awk '{print $1}' || true)
@@ -84,7 +79,7 @@ if docker info >/dev/null 2>&1; then
   echo "stopping proxy ..."
   ./cliproxy/stop.sh || true
 else
-  echo "docker not reachable — skipping proxy stop"
+  echo "docker not reachable - skipping proxy stop"
 fi
 
 # --- f. caffeinate ---

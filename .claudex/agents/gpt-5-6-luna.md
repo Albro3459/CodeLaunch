@@ -1,6 +1,6 @@
 ---
 name: gpt-5-6-luna
-description: GPT-5.6 Luna — efficient, high-volume workloads.
+description: GPT-5.6 Luna - efficient, high-volume workloads.
 model: opus
 ---
 

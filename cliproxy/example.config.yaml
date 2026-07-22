@@ -1,5 +1,5 @@
 # Copy to config.yaml and set a real api-key. config.yaml is gitignored.
-# host is 0.0.0.0 inside the container; exposure is restricted by the
+# host is 0.0.0.0 inside the container. Exposure is restricted by the
 # 127.0.0.1 publish in docker-compose.yml.
 host: "0.0.0.0"
 port: 8317
@@ -17,22 +17,17 @@ auth-dir: "/root/.cli-proxy-api"
 # logging-to-file: true
 # request-log: true
 
-# Aliasing REPLACES the upstream id: once gpt-5.6-luna is aliased, that raw id
-# stops resolving and only the alias names route. Unaliased upstream models
-# (gpt-5.4, gpt-5.6-terra) keep their own ids.
+# Aliasing replaces the upstream id: once a model is aliased, the raw id
+# stops resolving and only the alias names route. One upstream id can carry
+# many aliases, and they all coexist (check /v1/models to see every name).
 #
-# One upstream id may carry MANY aliases, and they all coexist - verified
-# against /v1/models, which lists every name below. That is what lets the
-# friendly names and the claude-* slugs point at the same models at once.
-#
-# The names here must stay in sync with ANTHROPIC_DEFAULT_*_MODEL in ../claudex
-# or role lookups fail with a misleading "502 unknown provider" that Claude Code
-# retries as if it were transient. They do NOT need to match customModels in
+# Names here must stay in sync with ANTHROPIC_DEFAULT_*_MODEL in ../claudex,
+# or role lookups fail. They don't need to match customModels in
 # ~/.t3/userdata/settings.json - see the T3 note below.
 #
-# An alias that differs from the upstream id only by case is silently ignored,
-# with the original left in place and nothing logged. Every alias below must
-# differ by an actual character - hence the spaces, including in "GPT 5.5".
+# An alias that differs from the upstream id only by case gets ignored, so
+# every alias needs a real character difference - hence the spaces, including
+# in "GPT 5.5".
 oauth-model-alias:
   codex:
     - name: "gpt-5.6-sol"
@@ -43,27 +38,18 @@ oauth-model-alias:
       alias: "GPT 5.5"
     - name: "gpt-5.4-mini"
       alias: "GPT 5.4 mini"
-    # T3 effort fix. T3's claudeAgent driver only passes `effort` to the Agent
-    # SDK for BUILT-IN Claude model slugs: custom models resolve to
-    # DEFAULT_CLAUDE_MODEL_CAPABILITIES (an empty descriptor list), so
-    # resolveClaudeEffort returns undefined and the reasoning selection is
-    # dropped before the SDK is called. No proxy setting can recover it - the
-    # value never leaves T3. Aliasing to built-in slugs makes T3 attach effort,
-    # which then translates low->low, medium->medium, high->high, max->xhigh.
+    # T3 effort fix. T3 only passes `effort` to the Agent SDK for built-in
+    # Claude model slugs, not custom models. Aliasing to a claude-* slug gets
+    # T3 to attach effort (low->low, medium->medium, high->high, max->xhigh).
+    # Downside: the model thinks it's Claude, so asking it what it is gives a
+    # confident wrong answer.
     #
-    # The CLI does not need this: ANTHROPIC_DEFAULT_*_SUPPORTED_CAPABILITIES in
+    # The CLI doesn't need this: ANTHROPIC_DEFAULT_*_SUPPORTED_CAPABILITIES in
     # ../claudex already tells Claude Code the friendly names accept effort.
-    # T3 ignores those env vars because it drives the SDK off its own table.
     #
-    # Tradeoff: under these slugs the model believes it is Claude (the system
-    # prompt says so and the id agrees), so asking it what it is returns a
-    # confident wrong answer, and model-conditional logic misfires toward
-    # Claude. The proxy logs are the only ground truth. Unavoidable if T3 is
-    # to pass effort at all.
-    #
-    # The [1m] variants cover T3's 1M context-window toggle, which appends
-    # "[1m]" to the model id. Haiku 4.5 has no effort selector in T3, only a
-    # thinking toggle, so mini gets no effort control through the app.
+    # The [1m] variants cover T3's 1M context-window toggle. Haiku 4.5 has no
+    # effort selector in T3, only a thinking toggle, so mini gets no effort
+    # control through the app.
     - name: "gpt-5.6-sol"
       alias: "claude-fable-5"
     - name: "gpt-5.6-sol"
@@ -92,23 +78,18 @@ oauth-model-alias:
 api-keys:
   - "REPLACE_WITH_LOCAL_API_KEY"
 
-# NOTE: this block is currently a NO-OP and is kept only as documentation of
-# intent. `default` fills reasoning.effort only when the client omits it, but
-# the /v1/messages -> codex translation always derives a level first, so there
-# is nothing to fill. Verified with debug: true - a request with no thinking
-# field arrives as level=medium, and Luna still logged medium despite the high
-# baseline below. A small thinking budget arrives as level=low and passes
-# through, so effort is effectively controlled by the client (Claude Code's
-# /effort and per-agent frontmatter), not by the proxy.
+# This block is a no-op, kept only as documentation. `default` fills
+# reasoning.effort only when the client omits it, but the /v1/messages ->
+# codex translation always sets a level first, so there's nothing to fill.
+# Effort ends up controlled by the client (Claude Code's /effort and
+# per-agent frontmatter), not by the proxy.
 #
-# Do NOT "fix" this with `override` - that force-replaces client values and
-# would break per-agent effort. Names here must be the upstream ids, not the
-# oauth-model-alias values; matching happens after alias resolution.
+# Don't switch this to `override` - that force-replaces client values and
+# breaks per-agent effort. Names here are the upstream ids, not the
+# oauth-model-alias values. Alias resolution does happen, but it's unclear
+# whether it runs before or after this matching.
 payload:
   default:
-    # Both the alias and the upstream name are listed because it is unverified
-    # whether matching happens before or after alias resolution. The one that
-    # does not match is simply inert.
     - models:
         - name: "gpt-5.6-sol"
           protocol: "codex"

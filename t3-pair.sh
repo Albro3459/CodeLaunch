@@ -1,21 +1,11 @@
 #!/usr/bin/env bash
-# Ensure a single loopback T3 backend is up, then mint a one-time pairing token
-# for the browser behind the Cloudflare tunnel. Reuses an existing backend (e.g.
-# the desktop app) if one is already listening; otherwise starts a headless one.
+# Makes sure a T3 backend is running on loopback, then mints a one-time pairing token for the browser.
 #
 #   ./t3-pair.sh            # 15m token (default)
 #   ./t3-pair.sh 5m         # custom TTL (any t3 --ttl form: 5m, 1h, 30d)
 #   ./t3-pair.sh --check-only   # verify T3_CHANNEL vs the desktop app, then exit
 #
-# The desktop .app is only a GUI; the backend is the same t3 server. Exactly one
-# backend may own the port. The pairing token is issued against the shared ~/.t3
-# auth store, so it validates whichever backend is running.
-#
-# T3_CHANNEL (.env, default latest) picks the npm dist-tag for both commands. It
-# MUST match the installed desktop app's channel: both share the ~/.t3 store and
-# the CLI runs schema migrations against it, so a mismatch can migrate the store
-# to a schema the other side does not understand. This script enforces that and
-# refuses to run on a mismatch. Escape hatch: T3_CHANNEL_SKIP_CHECK=1.
+# T3_CHANNEL must match the installed desktop app's channel, since both share the ~/.t3 store and a mismatch can break it. Escape hatch: T3_CHANNEL_SKIP_CHECK=1.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -36,9 +26,7 @@ TTL="${1:-15m}"
 listening() { lsof -nP -iTCP:"$T3_PORT" -sTCP:LISTEN 2>/dev/null; }
 
 # --- channel guard ---------------------------------------------------------
-# Resolve a desktop app bundle to its channel via CFBundleShortVersionString
-# (e.g. 0.0.29-nightly.20260722.875 -> nightly). The version string is the
-# signal, not the bundle name, so a renamed .app is still classified correctly.
+# Reads the channel from CFBundleShortVersionString (e.g. 0.0.29-nightly.20260722.875 -> nightly) so a renamed .app still classifies correctly.
 app_channel() {
   local ver
   ver=$(defaults read "$1/Contents/Info" CFBundleShortVersionString 2>/dev/null) || return 1
@@ -49,15 +37,12 @@ app_channel() {
   esac
 }
 
-# Prefer the app that actually owns the port — that is the backend the CLI will
-# migrate against. Fall back to a scan of installed bundles when nothing is up.
+# Prefers the app that owns the port, since that's the backend the CLI will migrate against, and falls back to scanning installed bundles if nothing is up.
 desktop_app=""
 running_pid=$(lsof -nP -iTCP:"$T3_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)
 if [ -n "$running_pid" ]; then
   running_cmd=$(ps -p "$running_pid" -o command= 2>/dev/null || true)
-  # Strip at the FIRST ".app/" to get the OUTERMOST bundle: Electron helper
-  # processes live in nested bundles whose Info.plist has no version string,
-  # which would silently skip this check.
+  # Strips at the first ".app/" to get the outermost bundle, since Electron helper bundles are nested and have no version string of their own.
   case "$running_cmd" in
     *.app/Contents/*) desktop_app="${running_cmd%%.app/*}.app" ;;
   esac
@@ -72,12 +57,11 @@ if [ -z "$desktop_app" ]; then
       n=$((n + 1))
     done
   done
-  # Exactly one installed bundle is unambiguous; with several we cannot know
-  # which one will own the port, so warn instead of guessing.
+  # Only counts when exactly one bundle is installed, since with several we can't guess which one owns the port.
   if [ "$n" -eq 1 ]; then
     desktop_app="$found"
   elif [ "$n" -gt 1 ]; then
-    echo "note: multiple T3 Code apps installed — cannot verify T3_CHANNEL against a specific one"
+    echo "note: multiple T3 Code apps installed - cannot verify T3_CHANNEL against a specific one"
   fi
 fi
 
@@ -86,24 +70,22 @@ if [ -n "$desktop_app" ] && [ "${T3_CHANNEL_SKIP_CHECK:-0}" != 1 ]; then
     if [ "$app_ch" != "$T3_CHANNEL" ]; then
       echo "REFUSING: T3_CHANNEL=$T3_CHANNEL but the desktop app is '$app_ch'."
       echo "  app:  $desktop_app"
-      echo "  The CLI and the desktop backend share ~/.t3 and the CLI runs schema"
-      echo "  migrations against it — mismatched channels can corrupt that store."
+      echo "  Mismatched channels can corrupt the shared ~/.t3 store during migrations."
       echo "  Fix: set T3_CHANNEL=$app_ch in .env, or install the $T3_CHANNEL cask."
       echo "  Override (not recommended): T3_CHANNEL_SKIP_CHECK=1 ./t3-pair.sh"
       exit 1
     fi
     echo "channel ok: T3_CHANNEL=$T3_CHANNEL matches the desktop app"
   else
-    echo "note: could not read a version from $desktop_app — skipping channel check"
+    echo "note: could not read a version from $desktop_app - skipping channel check"
   fi
 elif [ "${T3_CHANNEL_SKIP_CHECK:-0}" = 1 ]; then
-  echo "WARNING: T3_CHANNEL_SKIP_CHECK=1 — channel match not verified"
+  echo "WARNING: T3_CHANNEL_SKIP_CHECK=1 - channel match not verified"
 else
-  echo "no T3 desktop app found — using T3_CHANNEL=$T3_CHANNEL for the headless backend"
+  echo "no T3 desktop app found - using T3_CHANNEL=$T3_CHANNEL for the headless backend"
 fi
 
-# Callers that only want the guard (start.sh, pre-flight) stop here — no backend
-# is started and no token is minted.
+# Callers that only want the guard, like start.sh's pre-flight check, stop here before anything starts.
 if [ "$CHECK_ONLY" = 1 ]; then exit 0; fi
 
 if listening >/dev/null; then
@@ -119,8 +101,7 @@ else
   echo "backend up"
 fi
 
-# Never expose beyond loopback. The tunnel connects from localhost, so 0.0.0.0
-# is never needed and would put the backend on the LAN.
+# Never expose beyond loopback, since the tunnel connects from localhost and 0.0.0.0 would put the backend on the LAN.
 if listening | grep -q '0.0.0.0'; then
   echo "REFUSING: backend is bound to 0.0.0.0, not loopback. Fix before pairing."
   exit 1

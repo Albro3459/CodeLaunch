@@ -24,7 +24,7 @@ if listening >/dev/null; then
   echo "T3 backend already listening on :$T3_PORT (reusing)"
 else
   echo "starting headless T3 backend on 127.0.0.1:$T3_PORT ..."
-  npx --yes t3@latest serve --host 127.0.0.1 --port "$T3_PORT" >/tmp/t3-serve.log 2>&1 &
+  npx --yes t3@nightly serve --host 127.0.0.1 --port "$T3_PORT" >/tmp/t3-serve.log 2>&1 &
   for _ in $(seq 1 30); do
     listening >/dev/null && break
     sleep 1
@@ -41,7 +41,7 @@ if listening | grep -q '0.0.0.0'; then
 fi
 
 echo "minting pairing token (ttl $TTL) ..."
-npx --yes t3@latest auth pairing create \
+npx --yes t3@nightly auth pairing create \
   --ttl "$TTL" \
   --label "cloudflare-browser" \
   --base-url "https://$T3_HOSTNAME" 2>&1 | grep -vE 'INFO|Migrations'

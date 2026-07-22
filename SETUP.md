@@ -2,6 +2,15 @@
 
 Living command list. Keep updating as each phase lands. Full rationale: `TODO/TODO.md`.
 
+## Day-to-day
+
+Start and stop the whole stack with `./start.sh` and `./stop.sh` (`QUICK-SETUP.md`
+for the short version; "Step 5" below for the mechanics). Always-on requires
+power + `caffeinate -dims` + Remote Login + Wake for network access; `start.sh`
+starts `caffeinate` for you but cannot flip Wake for network access — enable it
+once in System Settings and verify `pmset -g | grep womp` shows `1`. With those
+set, locking the screen and closing the lid survive (tested, on power).
+
 ## Step 1 - CLIProxyAPI (Docker)
 
 Prereq: Docker Desktop running (`docker version`, `docker compose version`).
@@ -126,7 +135,7 @@ Install the desktop app and confirm the CLI entrypoint:
 
 ```bash
 brew install --cask t3-code
-npx --yes t3@latest --version
+npx --yes t3@nightly --version
 ```
 
 Status: `t3-code` `0.0.29-nightly.20260721.864` installed as
@@ -134,6 +143,15 @@ Status: `t3-code` `0.0.29-nightly.20260721.864` installed as
 the app as `legacyUserDataDirName`, so it still shows up as a userdata directory.
 Cask has `auto_updates` on, so re-check the version and backend port after it
 updates.
+
+**Use `t3@nightly`, not `t3@latest`.** The cask installs the nightly desktop
+build, and npm carries a matching `nightly` dist-tag (`npm view t3 dist-tags`);
+`latest` trails it by a minor version (`0.0.28` vs `0.0.29-nightly.*`). Both the
+CLI and the desktop backend share the `~/.t3` store and the CLI runs schema
+migrations against it, so an older stable CLI against a newer nightly backend is
+the skew worth avoiding. Every `npx` call here and in `t3-pair.sh` pins
+`t3@nightly` for that reason. If the cask is ever switched to a stable channel,
+flip these back together.
 
 Configure two providers in T3 Desktop.
 
@@ -327,7 +345,7 @@ Network access off. Re-check after a cask auto-update. If this ever shows
 Headless fallback, if Desktop's managed backend does not work out:
 
 ```bash
-npx --yes t3@latest serve --host 127.0.0.1
+npx --yes t3@nightly serve --host 127.0.0.1
 ```
 
 Run only one backend at a time. Pairing tokens and sessions are managed with
@@ -442,7 +460,7 @@ up after authenticating: expect Cloudflare error 1033 when no tunnel is running
 or the hostname is misrouted, and a 502 only once the tunnel is up but the origin
 port is dead. Start Desktop (or the headless backend) first and confirm with
 `lsof` as in Step 3. The headless entrypoint is
-`npx --yes t3@latest serve --host 127.0.0.1`; **not yet verified** - the CLI
+`npx --yes t3@nightly serve --host 127.0.0.1`; **not yet verified** - the CLI
 entrypoint check is still unchecked in `TODO/TODO.md` (Phase 5), so treat that
 command as unconfirmed until it is run.
 
@@ -561,3 +579,51 @@ token into the pairing field). It is one-time and short-lived; treat it like a
 password. `t3 auth pairing list|revoke` and `t3 auth session list|revoke` manage
 outstanding tokens and sessions. The headless-start path is unverified while the
 desktop app owns the port; test it with the app closed.
+
+## Step 5 - Orchestration (start.sh / stop.sh)
+
+`./start.sh [ttl]` brings the stack up in order, each step gated on a health
+check and idempotent so a live stack short-circuits to reuse:
+
+1. **prereqs** — `.env` loaded; `docker`, `cloudflared`, `claude`, `claudex`,
+   `npx` all on PATH (all missing reported at once).
+2. **caffeinate** — warns (not fails) off AC power; starts `caffeinate -dims` if
+   none is running. It cannot enable Wake for network access — that stays a
+   manual `pmset`/System Settings step (`pmset -g | grep womp` must read `1`).
+3. **Docker** — reuse if `docker info` succeeds; else `docker desktop start`
+   (native Desktop CLI; existence probed with `docker desktop --help` since
+   `status` can exit non-zero merely because Desktop is stopped) with an
+   `open -g -j -a Docker` fallback, then poll `docker info` up to 120s.
+4. **Codex token** — newest `cliproxy/auth/codex-*.json`; valid while now is
+   before the ISO-8601 `expired` field (compared tz-aware, offset preserved). If
+   expired/missing and stdin is a TTY, it runs `./cliproxy/login.sh` (browser,
+   callback `127.0.0.1:1455`) and re-checks; non-TTY it fails and tells you to
+   run login on the host.
+5. **cliproxy** — `./cliproxy/start.sh`, then an authenticated
+   `curl /v1/models` with the key grepped from `config.yaml`; a rejected key
+   fails loudly.
+6. **tunnel** — reuse if `cloudflared tunnel run` is already up; else launch it
+   to `/tmp/cloudflared-t3.log` and poll for `Registered tunnel connection` (up
+   to 30s; prints `tail -20` on timeout). Started just before the backend —
+   Access fronts the hostname, so this deviates from the "T3 first" ordering by
+   only seconds and keeps the printed pair link immediately usable.
+7. **backend + token** — `./t3-pair.sh [ttl]` reuses or starts the loopback T3
+   backend (refusing `0.0.0.0`) and mints the one-time pairing token.
+
+`./stop.sh` reverses it and deliberately leaves **Docker Desktop, the Docker
+daemon, and native Claude Code** running:
+
+- **tunnel** — SIGTERM via `pkill`, wait up to 35s for the 30s cloudflared grace,
+  then a second signal forces immediate exit.
+- **T3 backend** — the PID listening on `$T3_PORT`; if its command path contains
+  `T3 Code` it is Desktop-managed and quit with
+  `osascript -e 'quit app "T3 Code (Nightly)"'`, otherwise (headless `t3 serve`)
+  SIGTERM then SIGKILL as a last resort.
+- **claudex sessions** — matched by the literal `CLAUDE_CONFIG_DIR=$HOME/.claudex`
+  in the process **environment** (`ps eww` appends env vars); native Claude Code
+  lacks that marker, so it is never touched. SIGTERM only.
+- **cliproxy** — `./cliproxy/stop.sh` (`docker compose down`), skipped with a
+  note if docker is unreachable.
+- **caffeinate** — `pkill -f 'caffeinate -dims'`.
+
+Every kill is guarded with `|| true` so re-runs are clean no-ops.

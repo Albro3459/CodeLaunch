@@ -469,7 +469,15 @@ supports Okta/Entra/OIDC/SAML - not the Cloudflare IdP, Google, or OTP - and
 free-tier Independent MFA availability is unconfirmed, so account 2FA is the MFA
 layer here. The app pins `allowed_idps` to that one IdP with
 `auto_redirect_to_identity: true`, so there is no IdP chooser to leak other login
-methods.
+methods. Verified working from off-network/VPN: a Google-account login is refused
+(policy pins the exact email), only the pinned Cloudflare account + 2FA passes.
+
+The Cloudflare-IdP consent screen ("... wants to connect to Cloudflare") took its
+label from the IdP `name`, which was empty and showed as "Unknown app". Setting
+the IdP `name` to `T3 Code` (`PUT .../access/identity_providers/<id>`, preserving
+`type: cloudflare` and `config.restrict_to_account_members: true`) is the lever;
+the Access app `name` and org name do not drive it. Undocumented, so re-verify
+after Cloudflare changes.
 
 ### 4B. Tunnel
 
@@ -525,3 +533,31 @@ Verify in this order, from a private window:
 - `lsof -nP -iTCP -sTCP:LISTEN` shows T3 on loopback only, never `0.0.0.0`.
 
 Revoke the test session afterward with `t3 auth session`.
+
+### 4D. T3 pairing (app-layer gate, separate from Access)
+
+Passing Cloudflare Access is not enough: T3 requires its own one-time pairing
+credential before a browser can drive the backend, so a remote browser lands on
+"Pair with this environment". This is a second, independent layer - even a
+misconfigured Access policy leaves the backend unusable without a T3 session.
+Leave Desktop's **Network access** on "Limited to this machine"; turning it on
+binds `0.0.0.0`, which the tunnel never needs (it connects over loopback) and
+which Step 3 forbids.
+
+The desktop `.app` is only a GUI - the backend is the same `t3` server it spawns,
+runnable headless with `t3 serve --host 127.0.0.1`. Pairing tokens are issued by
+the CLI against the shared `~/.t3` auth store (default `T3CODE_HOME`), so they
+validate whichever single backend is listening. `./t3-pair.sh` wraps this: it
+reuses an existing backend or starts a headless one, refuses to proceed if the
+port is on `0.0.0.0`, and prints a token plus a ready `/pair#token=...` link.
+
+```bash
+./t3-pair.sh            # 15m token (default)
+./t3-pair.sh 5m         # custom TTL
+```
+
+Open the printed URL in the already-Access-authenticated browser (or paste the
+token into the pairing field). It is one-time and short-lived; treat it like a
+password. `t3 auth pairing list|revoke` and `t3 auth session list|revoke` manage
+outstanding tokens and sessions. The headless-start path is unverified while the
+desktop app owns the port; test it with the app closed.

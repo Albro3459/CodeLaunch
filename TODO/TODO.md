@@ -598,8 +598,8 @@ Implementation note: 6A/6B were done via the Cloudflare REST API with a scoped, 
 
 - [x] Confirm the tunnel is Healthy and the local origin does not return a 502. Healthy; edge returns Access 302 (not 1033/502).
 - [ ] From a private/incognito browser, visit `https://code.<domain>`. Confirm Cloudflare Access blocks the T3 response until the exact email and MFA succeed. Edge gate confirmed via curl (302 → Access login, correct `aud`); the actual login + wrong-email rejection still need a browser test by the user.
-- [ ] Complete T3's separate one-time pairing flow. Confirm a second browser/device without a T3 session cannot use the backend even after Cloudflare login.
-- [ ] Verify a live agent response streams through the browser. T3 uses WebSockets, and Cloudflare Tunnel supports WebSockets, but the end-to-end flow still needs a real streaming test.
+- [x] Complete T3's separate one-time pairing flow. Confirm a second browser/device without a T3 session cannot use the backend even after Cloudflare login. Paired an off-network browser via a one-time token (`t3 auth pairing create`); the prompt appears only after Access passes, confirming the second layer. Wrapped in `./t3-pair.sh` (reuses or starts a single loopback backend, then mints a 15m token + `/pair` link).
+- [x] Verify a live agent response streams through the browser. Confirmed end to end from a device off the local network and off VPN - live agent responses stream through the tunnel (WebSocket).
 - [ ] After validation, do not install a login/boot launch agent. Instead start the stack on demand with a single orchestration script (see Phase 6D). This keeps startup explicit and ordered rather than tied to login.
 
 ### 6D. Startup orchestration script

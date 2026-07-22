@@ -33,4 +33,4 @@ a subagent's `effort` frontmatter or an explicit `/effort` choice still wins.
 
 ## Shared rules
 
-@/../.claude/CLAUDE.md
+@/Users/<username>/.claude/CLAUDE.md

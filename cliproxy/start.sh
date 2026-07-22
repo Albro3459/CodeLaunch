@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-[ -f config.yaml ] || { echo "config.yaml missing. Run: cp config.example.yaml config.yaml and set your api-key."; exit 1; }
+[ -f config.yaml ] || { echo "config.yaml missing. Run: cp example.config.yaml config.yaml and set your api-key."; exit 1; }
 
 docker compose up -d
 

@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-[ -f config.yaml ] || { echo "config.yaml missing. Run: cp config.example.yaml config.yaml and set your api-key."; exit 1; }
+[ -f config.yaml ] || { echo "config.yaml missing. Run: cp example.config.yaml config.yaml and set your api-key."; exit 1; }
 
 docker compose run --rm -p 127.0.0.1:1455:1455 cliproxyapi \
   /CLIProxyAPI/CLIProxyAPI --codex-login

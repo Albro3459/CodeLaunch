@@ -72,7 +72,7 @@ Codex-model session in Claude Code harness
 - [x] Node.js, npm, and npx are installed through `fnm`: Node `v24.18.0` and npm `11.16.0`.
 - [ ] Ensure `fnm` activation is available in every shell or service that will run `npx t3`. The non-interactive execution shell used during research did not inherit the user's `fnm` multishell path, which caused the earlier false "Node not installed" finding.
 - [ ] Decide whether to install the standalone Codex CLI. It is optional for the proxy-backed Claude profile, but required for T3's native Codex provider and the optional official Codex plugin.
-- [x] Install T3 Code. Desktop is installed and running; its backend listens on `127.0.0.1:3773`. The `t3` CLI is still not on `PATH` — use `npx t3@latest` for CLI work.
+- [x] Install T3 Code. Desktop is installed and running; its backend listens on `127.0.0.1:3773`. The `t3` CLI is still not on `PATH` - use `npx t3@latest` for CLI work.
 - [x] Install `cloudflared`. Present at `/opt/homebrew/bin/cloudflared`.
 - [x] Install Docker Desktop and confirm `docker` and `docker compose` are available. `docker` at `/usr/local/bin/docker`; the `cliproxyapi` container runs under compose.
 
@@ -164,7 +164,7 @@ Deployment choice: run CLIProxyAPI in Docker (portable across machines and opera
 
   In Docker the container's `host` is set to `0.0.0.0` so the process is reachable inside the container network, and exposure is restricted by publishing to `127.0.0.1:8317` on the host. Verify the exact image name, tag, and in-container config/auth paths against current CLIProxyAPI docs before first run; pin a specific tag rather than `latest` once confirmed.
 
-  As built (2026-07-21), this landed in `cliproxy/` **inside** this repository rather than outside it. `config.yaml`, `auth/`, and `*.log` are covered by `.gitignore` and `git ls-files cliproxy` confirms only `docker-compose.yml`, `example.config.yaml`, `login.sh`, `start.sh`, and `stop.sh` are tracked — no secret is committed. The real values also differ from the sketch above: image `eceasy/cli-proxy-api:latest`, config mounted at `/CLIProxyAPI/config.yaml`, auth bind-mounted from `./auth` to `/root/.cli-proxy-api` (a bind mount, not a named `cliproxy-auth` volume).
+  As built (2026-07-21), this landed in `cliproxy/` **inside** this repository rather than outside it. `config.yaml`, `auth/`, and `*.log` are covered by `.gitignore` and `git ls-files cliproxy` confirms only `docker-compose.yml`, `example.config.yaml`, `login.sh`, `start.sh`, and `stop.sh` are tracked - no secret is committed. The real values also differ from the sketch above: image `eceasy/cli-proxy-api:latest`, config mounted at `/CLIProxyAPI/config.yaml`, auth bind-mounted from `./auth` to `/root/.cli-proxy-api` (a bind mount, not a named `cliproxy-auth` volume).
 
 - [ ] Pin the image to a specific tag instead of `latest`. `eceasy/cli-proxy-api:latest` currently resolves to `v7.2.92`; pin that digest/tag so an upstream push cannot silently change routing behavior.
 
@@ -235,7 +235,7 @@ Not used. The Docker path in 2A is working, so this subsection stays unchecked a
 
 ### 2C. Effort policy (per-model defaults)
 
-CLIProxyAPI's `payload` section applies request rules per model. Use **`default`** rules, which set `reasoning.effort` only when the client omits it — this yields a per-model baseline while still letting a subagent's `effort` frontmatter or the interactive `/effort` slider win when Claude Code sends one. Do **not** use `override` (it force-replaces the client value and erases per-subagent and per-turn choices). Add this to whichever config file the deployment uses (Docker `config.yaml` or the native `.conf`).
+CLIProxyAPI's `payload` section applies request rules per model. Use **`default`** rules, which set `reasoning.effort` only when the client omits it - this yields a per-model baseline while still letting a subagent's `effort` frontmatter or the interactive `/effort` slider win when Claude Code sends one. Do **not** use `override` (it force-replaces the client value and erases per-subagent and per-turn choices). Add this to whichever config file the deployment uses (Docker `config.yaml` or the native `.conf`).
 
 Desired baselines: `high` for Sol and Luna, `medium` for GPT-5.5 and GPT-5.4 mini. Because the rule keys on the destination model, Luna gets `high` whether it is the main agent or a subagent, unless its subagent frontmatter sends a lower value for the sub case.
 
@@ -262,12 +262,12 @@ payload:
 - [x] Confirm the correct `protocol` value for how CLIProxyAPI routes these models to the Codex upstream. `codex` is correct.
 - [x] Live-test the layering (raw `/v1/chat/completions`, 2026-07-21): with no client effort, `gpt-5.6-sol` reasoning tokens tracked forced `high` and sat well above forced `low`, confirming the `default` rule injects `high` and yields to an explicit client value. Still to test through Claude Code: that a subagent `effort` frontmatter overrides the default for that agent only.
 
-**Correction — the `payload` block is inert on the path Claude Code actually uses.** The result above was measured on `/v1/chat/completions`. Claude Code speaks `/v1/messages`, and that translation always derives a `reasoning.effort` level before the `default` rule is evaluated, so there is never an omitted value for `default` to fill. Verified with `debug: true`: a request with no thinking field arrives as `level=medium`, and Luna logged `medium` despite the `high` baseline; a small thinking budget arrives as `level=low` and passes through. Effort is therefore controlled entirely by the client (Claude Code `/effort`, per-agent frontmatter, T3's effort selector), not by the proxy. The block is kept in `config.yaml` as documented intent. Do **not** "fix" this with `override` — that force-replaces client values and would break per-agent effort.
+**Correction - the `payload` block is inert on the path Claude Code actually uses.** The result above was measured on `/v1/chat/completions`. Claude Code speaks `/v1/messages`, and that translation always derives a `reasoning.effort` level before the `default` rule is evaluated, so there is never an omitted value for `default` to fill. Verified with `debug: true`: a request with no thinking field arrives as `level=medium`, and Luna logged `medium` despite the `high` baseline; a small thinking budget arrives as `level=low` and passes through. Effort is therefore controlled entirely by the client (Claude Code `/effort`, per-agent frontmatter, T3's effort selector), not by the proxy. The block is kept in `config.yaml` as documented intent. Do **not** "fix" this with `override` - that force-replaces client values and would break per-agent effort.
 
 - [ ] Decide whether to delete the inert `payload` block or leave it as documentation. If per-model baselines are actually wanted, they must be set client-side (agent frontmatter / profile `effortLevel`), not in the proxy.
 
 - [x] Put the same local API key in a private shell environment or secret store as `CLIPROXY_LOCAL_API_KEY`. Do not put it in this repository. The `claudex` wrapper reads `$CLIPROXY_LOCAL_API_KEY` first and falls back to scraping the key out of the gitignored `cliproxy/config.yaml`.
-- [x] Create `~/.claudex` as the isolated Claudex configuration directory. Copy or link only the settings, skills, commands, rules, and MCP configuration that should be common. Do not copy native authentication caches or session state wholesale. Done — `~/.claudex` has its own `settings.json`, `agents/`, `skills/`, `projects/`, and `sessions/`.
+- [x] Create `~/.claudex` as the isolated Claudex configuration directory. Copy or link only the settings, skills, commands, rules, and MCP configuration that should be common. Do not copy native authentication caches or session state wholesale. Done - `~/.claudex` has its own `settings.json`, `agents/`, `skills/`, `projects/`, and `sessions/`.
 - [x] Add a Claudex-specific `~/.claudex/CLAUDE.md` that lists the GPT-named subagents and their role mappings, and tells the parent to delegate using those agent names rather than Claude model names. It imports the shared `~/.claude/CLAUDE.md` for common rules.
 - [ ] Reconcile the "primary model" statement. This item originally called for Sol as primary, but `~/.claudex/CLAUDE.md` names GPT-5.6 Luna (the `opus` role) as primary, the wrapper sets `ANTHROPIC_MODEL=opus`, and `~/.claudex/settings.json` sets `"model": "haiku"` with `"effortLevel": "low"`. Pick one intended default and make the three agree.
 - [x] Launch a one-off Sol session from the isolated Claudex profile using the adjusted Tibo/Theo recipe and the four role mappings. Superseded by the `claudex` wrapper at `~/.local/bin/claudex` (source in `claudex/`), which applies the same `env -u ANTHROPIC_API_KEY` invocation and forwards arguments.
@@ -329,7 +329,7 @@ For this setup:
 **Capability-declaration caveat (verified 2026-07-20).** Claude Code's `model-config` docs state that the `_NAME`, `_DESCRIPTION`, and `_SUPPORTED_CAPABILITIES` companion variables "take effect on third-party providers such as Amazon Bedrock, Google Cloud's Agent Platform, and Microsoft Foundry," and that only `_NAME` and `_DESCRIPTION` "also take effect when `ANTHROPIC_BASE_URL` points to an LLM gateway." A custom base URL like CLIProxyAPI is treated as a gateway, so `_SUPPORTED_CAPABILITIES` is likely ignored on this path. The friendly GPT display names will still appear, but selectable per-role effort may not. Two consequences:
 
 - Behind a gateway, capability detection falls back to model-ID pattern matching (a `gpt-*` ID matches no Claude pattern, so `/effort` may be absent) or to gateway model discovery. Set `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` and confirm CLIProxyAPI's `/v1/models` reports the effort capability metadata for each model. Treat "is `/effort` selectable through the proxy?" as a mandatory live gate, not an assumption.
-- Effort strategy regardless of whether `/effort` works: set per-model **`default`** rules in CLIProxyAPI's `payload` config (see Phase 2's effort-policy step). `default` fills `reasoning.effort` only when the client omits it, so it gives a guaranteed per-model baseline (`high` for sol/luna, `medium` for 5.5/5.4-mini) that reaches the model even if Claude Code never exposes the control, while still yielding to any effort the client does send. Do not use `override` here — `override` force-replaces the client value and would erase per-subagent and per-turn choices.
+- Effort strategy regardless of whether `/effort` works: set per-model **`default`** rules in CLIProxyAPI's `payload` config (see Phase 2's effort-policy step). `default` fills `reasoning.effort` only when the client omits it, so it gives a guaranteed per-model baseline (`high` for sol/luna, `medium` for 5.5/5.4-mini) that reaches the model even if Claude Code never exposes the control, while still yielding to any effort the client does send. Do not use `override` here - `override` force-replaces the client value and would erase per-subagent and per-turn choices.
 - If `_SUPPORTED_CAPABILITIES` ever does take effect here, note the doc rule: "listed capabilities are enabled and unlisted capabilities are disabled." The value `effort,xhigh_effort,max_effort` omits `thinking`, `adaptive_thinking`, and `interleaved_thinking`, so those would be turned off. Add them if that reasoning behavior is wanted through the proxy.
 
 ## Phase 3: isolated GPT-named Claudex agents
@@ -357,7 +357,7 @@ For this setup:
   ```
 
 - [x] Add equivalent `gpt-5-5` and `gpt-5-4-mini` agents using `model: sonnet` and `model: haiku`. A fourth agent `gpt-5-6-sol` (`model: fable`) was also added, so Sol is reachable as a subagent and not only as the parent. None of the four set `effort` in frontmatter.
-- [ ] Revisit effort layering now that the Phase 2C proxy baseline is known to be inert on `/v1/messages`. With no `effort` in frontmatter and no proxy default, each subagent inherits whatever effort the parent sends. If Luna-as-sub should be cheaper than Luna-as-main, that now requires an explicit `effort` in the agent frontmatter — there is no proxy-side floor to fall back on.
+- [ ] Revisit effort layering now that the Phase 2C proxy baseline is known to be inert on `/v1/messages`. With no `effort` in frontmatter and no proxy default, each subagent inherits whatever effort the parent sends. If Luna-as-sub should be cheaper than Luna-as-main, that now requires an explicit `effort` in the agent frontmatter - there is no proxy-side floor to fall back on.
 - [ ] Open `/agents` in Claudex and verify all four GPT-named agents are discovered. Explicit invocation can use `@agent-gpt-5-6-luna`, `@agent-gpt-5-5`, or `@agent-gpt-5-4-mini`.
 - [ ] Run one bounded delegation through each agent. Check CLIProxyAPI logs to prove the child requests resolved to Luna, GPT-5.5, and GPT-5.4 mini. Do not accept only the subagent's self-reported model name as proof.
 - [ ] Test context compaction in a disposable long session before relying on this setup for production work.
@@ -449,7 +449,7 @@ CLIProxyAPI also documents Claude OAuth, so a Sol-first mixed-provider experimen
 
 - [x] Open T3 Desktop and configure two Claude providers.
 
-  As built, the two provider instances in `~/.t3/userdata/settings.json` are `claudeAgent` (native, `binaryPath: claude`) and `claudex` (`binaryPath: /Users/<username>/.local/bin/claudex`). The environment block below is **not** entered into T3's environment fields — the `claudex` wrapper applies all of it, so T3 only needs the binary path. Entering them in T3 is not merely redundant: the wrapper's final `exec env VAR=... "$CLAUDE_BIN"` sets each one as a literal assignment, which overrides whatever T3 exported, so a value typed into T3 has no effect and logs nothing. That keeps one authoritative copy of the mapping and makes the CLI and T3 behave identically. The variable list below is retained as the reference for what the wrapper sets:
+  As built, the two provider instances in `~/.t3/userdata/settings.json` are `claudeAgent` (native, `binaryPath: claude`) and `claudex` (`binaryPath: /Users/<username>/.local/bin/claudex`). The environment block below is **not** entered into T3's environment fields - the `claudex` wrapper applies all of it, so T3 only needs the binary path. Entering them in T3 is not merely redundant: the wrapper's final `exec env VAR=... "$CLAUDE_BIN"` sets each one as a literal assignment, which overrides whatever T3 exported, so a value typed into T3 has no effect and logs nothing. That keeps one authoritative copy of the mapping and makes the CLI and T3 behave identically. The variable list below is retained as the reference for what the wrapper sets:
 
   **Claude Native**
 
@@ -487,13 +487,13 @@ CLIProxyAPI also documents Claude OAuth, so a Sol-first mixed-provider experimen
   ENABLE_TOOL_SEARCH=false
   ```
 
-  Put these values in the provider's Environment variables section, not in launch arguments. Mark the local API key as sensitive. Do not set `CLAUDE_CODE_SUBAGENT_MODEL` or `CLAUDE_CODE_EFFORT_LEVEL`; those would override per-agent model roles or selectable effort. Two deviations from the block above are intentional in the shipped wrapper: `ANTHROPIC_DEFAULT_*_MODEL` are set to the friendly alias strings (`GPT-5.6 Sol`, `GPT-5.6 Luna`, `GPT 5.5`, `GPT 5.4 mini`) rather than the raw upstream ids; and `ANTHROPIC_MODEL=opus` is set to pin the default main role. Raw ids are unusable — `oauth-model-alias` replaces the upstream id, so `gpt-5.6-luna` stops resolving once aliased. That leaves the friendly names and the `claude-*` slugs, equally valid aliases for the same upstream models. The split between them is by client. The CLI applies reasoning effort itself, so the friendly names keep honest labels there — but only because `ANTHROPIC_DEFAULT_*_SUPPORTED_CAPABILITIES` tells Claude Code these custom names accept effort at all (see `SETUP.md`); without it the flag is ignored. The Claude slugs exist for T3, whose `claudeAgent` driver drops effort for anything that is not a built-in Claude slug. Both profiles can leave Claude HOME path empty: native Claude then uses its default `~/.claude`, while the proxy provider's `CLAUDE_CONFIG_DIR` redirects only Claudex to `~/.claudex`. Select Fable as the default main role through T3 if its provider UI supports a default without locking the thread picker.
+  Put these values in the provider's Environment variables section, not in launch arguments. Mark the local API key as sensitive. Do not set `CLAUDE_CODE_SUBAGENT_MODEL` or `CLAUDE_CODE_EFFORT_LEVEL`; those would override per-agent model roles or selectable effort. Two deviations from the block above are intentional in the shipped wrapper: `ANTHROPIC_DEFAULT_*_MODEL` are set to the friendly alias strings (`GPT-5.6 Sol`, `GPT-5.6 Luna`, `GPT 5.5`, `GPT 5.4 mini`) rather than the raw upstream ids; and `ANTHROPIC_MODEL=opus` is set to pin the default main role. Raw ids are unusable - `oauth-model-alias` replaces the upstream id, so `gpt-5.6-luna` stops resolving once aliased. That leaves the friendly names and the `claude-*` slugs, equally valid aliases for the same upstream models. The split between them is by client. The CLI applies reasoning effort itself, so the friendly names keep honest labels there - but only because `ANTHROPIC_DEFAULT_*_SUPPORTED_CAPABILITIES` tells Claude Code these custom names accept effort at all (see `SETUP.md`); without it the flag is ignored. The Claude slugs exist for T3, whose `claudeAgent` driver drops effort for anything that is not a built-in Claude slug. Both profiles can leave Claude HOME path empty: native Claude then uses its default `~/.claude`, while the proxy provider's `CLAUDE_CONFIG_DIR` redirects only Claudex to `~/.claudex`. Select Fable as the default main role through T3 if its provider UI supports a default without locking the thread picker.
 
 - [ ] Start one T3 thread with **Claude Native** and verify Fable, Opus, Sonnet, and Haiku retain their normal native mappings.
 - [ ] Start a different T3 thread with **Claude via CLIProxyAPI** and verify it loads `~/.claudex/CLAUDE.md`, discovers the GPT-named agents, and routes Fable, Opus, Sonnet, and Haiku to Sol, Luna, GPT-5.5, and GPT-5.4 mini.
 - [ ] Confirm `/status` and CLIProxyAPI logs prove the Claudex thread uses the proxy and isolated configuration.
-- [ ] Verify the T3 model picker end to end against a running proxy. The `claude-*` aliases and the `hiddenModels` picker state are written (`cliproxy/config.yaml`, `cliproxy/example.config.yaml`, `.t3/example.client-settings.json`) but **not** tested: restart the proxy (`./cliproxy/stop.sh` then `./cliproxy/start.sh` — `config.yaml` is a read-only bind mount read at startup, and `start.sh` alone will not recreate a running container), then confirm `Claude Fable 5`, `Claude Opus 4.8`, `Claude Sonnet 5` and `Claude Haiku 4.5` all resolve, including the Sonnet 5 1M context toggle (`claude-sonnet-5[1m]`).
-- [x] Verify what `max` does on the `claude-sonnet-5` row. Upstream `gpt-5.5` supports `none, low, medium, high, xhigh` and has no `max`. `claude-sonnet-4-6`'s `max` → `high` rewrite was accidentally protective; Sonnet 5 has no such rewrite, so picking "Max" sends a literal `max` to a model that does not advertise it. **Tested: it fails — the request errors rather than falling back to a default.** `payload.default` is no backstop: it only fills an *omitted* effort, and "Max" sends one explicitly. T3 offers no way to remove `max` from the picker (the effort list is baked into the built-in slug's descriptor; `hiddenModels` hides whole rows only), so this stands as a usage constraint: **`xhigh` is the top usable level on the Sonnet 5 row.**
+- [ ] Verify the T3 model picker end to end against a running proxy. The `claude-*` aliases and the `hiddenModels` picker state are written (`cliproxy/config.yaml`, `cliproxy/example.config.yaml`, `.t3/example.client-settings.json`) but **not** tested: restart the proxy (`./cliproxy/stop.sh` then `./cliproxy/start.sh` - `config.yaml` is a read-only bind mount read at startup, and `start.sh` alone will not recreate a running container), then confirm `Claude Fable 5`, `Claude Opus 4.8`, `Claude Sonnet 5` and `Claude Haiku 4.5` all resolve, including the Sonnet 5 1M context toggle (`claude-sonnet-5[1m]`).
+- [x] Verify what `max` does on the `claude-sonnet-5` row. Upstream `gpt-5.5` supports `none, low, medium, high, xhigh` and has no `max`. `claude-sonnet-4-6`'s `max` -> `high` rewrite was accidentally protective; Sonnet 5 has no such rewrite, so picking "Max" sends a literal `max` to a model that does not advertise it. **Tested: it fails - the request errors rather than falling back to a default.** `payload.default` is no backstop: it only fills an *omitted* effort, and "Max" sends one explicitly. T3 offers no way to remove `max` from the picker (the effort list is baked into the built-in slug's descriptor; `hiddenModels` hides whole rows only), so this stands as a usage constraint: **`xhigh` is the top usable level on the Sonnet 5 row.**
 - [ ] Treat native Claude and Claudex as separate session families. Do not assume a thread can switch providers safely when the providers use different configuration directories and credential stores.
 - [ ] Optionally configure a third, direct Codex provider only after installing and logging in to the standalone Codex CLI. This is not required for using Codex models through the Claude Code harness.
 - [ ] Create a disposable T3 project and run one prompt through each provider.
@@ -503,9 +503,9 @@ CLIProxyAPI also documents Claude OAuth, so a Sol-first mixed-provider experimen
 
 Preferred first attempt:
 
-- [ ] Use the Desktop-managed local backend and proxy its loopback endpoint with `cloudflared`.
+- [x] Use the Desktop-managed local backend and proxy its loopback endpoint with `cloudflared`. Backend on `127.0.0.1:3773`, tunnel origin points there; headless `t3 serve` is the alternative path (see `t3-pair.sh`).
 - [x] Leave **Network access** off if the backend is already reachable at `127.0.0.1:<T3_PORT>` from the same Mac. Confirmed on the installed release: with Network access off, T3 still binds `127.0.0.1:3773` and no LAN listener appears.
-- [ ] If Desktop requires **Network access** to create remote pairing credentials or expose the backend, enable it only after checking the resulting listeners and local firewall exposure.
+- [x] If Desktop requires **Network access** to create remote pairing credentials or expose the backend, enable it only after checking the resulting listeners and local firewall exposure. Resolved: it does not. Network access stays "Limited to this machine" (loopback); pairing tokens are minted via the CLI (`t3 auth pairing` / `t3-pair.sh`) and the tunnel reaches the backend over loopback.
 
 Headless fallback:
 
@@ -513,7 +513,7 @@ Headless fallback:
 npx t3@latest serve --host 127.0.0.1
 ```
 
-- [ ] Run only one T3 backend at a time; avoid a Desktop/headless port or state conflict.
+- [x] Run only one T3 backend at a time; avoid a Desktop/headless port or state conflict. `t3-pair.sh` reuses an existing listener on `$T3_PORT` instead of starting a second backend.
 - [ ] Save the one-time owner pairing URL securely. T3 exchanges it for a device session; the URL/token must be treated as a password until used or revoked.
 - [ ] Use `t3 auth` to inspect and revoke old pairing credentials and device sessions.
 - [ ] Remember the current remote limitation: remote GUIs may not support adding projects. Add required projects from the server machine with `t3 project ...` if needed.
@@ -524,7 +524,7 @@ Prerequisites:
 
 - [x] Put the chosen domain/zone on Cloudflare DNS and confirm its nameservers are active. Confirmed active 2026-07-21.
 - [x] Choose a single-label hostname such as `code.example.com`. `code.example.com`.
-- [x] Decide the exact allowed email address and the Cloudflare account/IdP used to authenticate it. `you@example.com`, authenticated via the built-in **Cloudflare** IdP (login with the Cloudflare account; MFA inherited from account 2FA).
+- [x] Decide the exact allowed email address and the Cloudflare account/IdP used to authenticate it. `<email>`, authenticated via the built-in **Cloudflare** IdP (login with the Cloudflare account; MFA inherited from account 2FA).
 - [x] Use a one-hour Access application/policy session as the initial "short session" value. Adjust only after real use. Both app and policy set to `1h`.
 
 Implementation note: 6A/6B were done via the Cloudflare REST API with a scoped, short-lived token instead of the dashboard + `cloudflared tunnel login`. This avoids writing an account-wide `~/.cloudflared/cert.pem` (10-year, manage-all-tunnels credential). The tunnel was created with `POST /accounts/{id}/cfd_tunnel` (`config_src: local`) and a locally generated `tunnel_secret`; `cloudflared tunnel run` works from `config.yml` + the `<UUID>.json` credentials file with no `cert.pem` present. IDs live only on the host / in Cloudflare, not in git. Delete the setup token when done.
@@ -534,7 +534,7 @@ Implementation note: 6A/6B were done via the Cloudflare REST API with a scoped, 
 - [x] In Cloudflare Zero Trust, configure an identity provider. Org has exactly one IdP, type `cloudflare` (the built-in Cloudflare identity provider), id `a3c84991-...`. App pins `allowed_idps` to it with `auto_redirect_to_identity: true`.
 - [~] Turn on independent MFA at the organization level. Not used: MFA rides the Cloudflare account's own 2FA via the Cloudflare IdP (account 2FA enabled). AMR-based MFA rules only support Okta/Entra/OIDC/SAML, and free-tier availability of Independent MFA is unconfirmed. Revisit if switching IdPs.
 - [x] Create a self-hosted Access application for `code.<domain>`. App `T3 Code`, id `aaeeddb3-...`, `aud 77b4e427...`, `session_duration 1h`.
-- [x] Create an Allow policy with an exact identity selector: reusable account-level policy `<policy-id>-...`, `decision allow`, `include: [{email: you@example.com}]`, `1h`.
+- [x] Create an Allow policy with an exact identity selector: reusable account-level policy `<policy-id>-...`, `decision allow`, `include: [{email: <email>}]`, `1h`.
 
   ```text
   Action: Allow
@@ -546,18 +546,18 @@ Implementation note: 6A/6B were done via the Cloudflare REST API with a scoped, 
 
 - [x] Do not use `Include Everyone`. Single email include only.
 - [x] Do not use `Include Login Methods: One-time PIN` by itself. No OTP IdP configured; only the Cloudflare IdP.
-- [ ] Test the policy with the intended email and a different email before starting the tunnel. Pending — needs a browser login (see 6C verification). Edge gate already confirmed: unauthenticated request 302s to the Access login with the correct `aud`.
+- [x] Test the policy with the intended email and a different email before starting the tunnel. Verified from an off-network browser: the pinned Cloudflare account (email + password + 2FA) passes; a different Google account is refused.
 
 ### 6B. Install and create a locally managed Tunnel
 
-- [x] Install `cloudflared`. Present at `/opt/homebrew/bin/cloudflared`. Not yet configured — `~/.cloudflared` does not exist, so `tunnel login`/`create` are still to run.
+- [x] Install `cloudflared`. Present at `/opt/homebrew/bin/cloudflared`. Not yet configured - `~/.cloudflared` does not exist, so `tunnel login`/`create` are still to run.
 
   ```bash
   brew install cloudflared
   cloudflared version
   ```
 
-- [x] Authenticate the CLI and create the named tunnel. Done via API instead of `cloudflared tunnel login` — tunnel `t3-code`, UUID `1c426c95-...`, `config_src: local`. No `cert.pem` written.
+- [x] Authenticate the CLI and create the named tunnel. Done via API instead of `cloudflared tunnel login` - tunnel `t3-code`, UUID `1c426c95-...`, `config_src: local`. No `cert.pem` written.
 
   ```bash
   # API path used (no cert.pem): generate a 32-byte secret, then
@@ -577,14 +577,14 @@ Implementation note: 6A/6B were done via the Cloudflare REST API with a scoped, 
     - service: http_status:404
   ```
 
-- [x] Validate the ingress configuration and hostname match. `ingress validate` → OK; `ingress rule` matches rule #0 → `http://127.0.0.1:3773`.
+- [x] Validate the ingress configuration and hostname match. `ingress validate` -> OK; `ingress rule` matches rule #0 -> `http://127.0.0.1:3773`.
 
   ```bash
   cloudflared tunnel ingress validate
   cloudflared tunnel ingress rule https://code.<domain>
   ```
 
-- [x] Create the DNS CNAME route. Done via DNS API instead of `route dns` (which needs `cert.pem`): `POST /zones/{id}/dns_records` CNAME `code` → `<UUID>.cfargotunnel.com`, proxied.
+- [x] Create the DNS CNAME route. Done via DNS API instead of `route dns` (which needs `cert.pem`): `POST /zones/{id}/dns_records` CNAME `code` -> `<UUID>.cfargotunnel.com`, proxied.
 
 - [x] Confirm the generated proxied CNAME points at `<TUNNEL_UUID>.cfargotunnel.com`. Confirmed proxied; `code.example.com` resolves to Cloudflare edge IPs.
 
@@ -597,7 +597,7 @@ Implementation note: 6A/6B were done via the Cloudflare REST API with a scoped, 
   ```
 
 - [x] Confirm the tunnel is Healthy and the local origin does not return a 502. Healthy; edge returns Access 302 (not 1033/502).
-- [ ] From a private/incognito browser, visit `https://code.<domain>`. Confirm Cloudflare Access blocks the T3 response until the exact email and MFA succeed. Edge gate confirmed via curl (302 → Access login, correct `aud`); the actual login + wrong-email rejection still need a browser test by the user.
+- [x] From a private/incognito browser, visit `https://code.<domain>`. Confirm Cloudflare Access blocks the T3 response until the exact email and MFA succeed. Confirmed: Access gates the response until the pinned account + 2FA; wrong account refused.
 - [x] Complete T3's separate one-time pairing flow. Confirm a second browser/device without a T3 session cannot use the backend even after Cloudflare login. Paired an off-network browser via a one-time token (`t3 auth pairing create`); the prompt appears only after Access passes, confirming the second layer. Wrapped in `./t3-pair.sh` (reuses or starts a single loopback backend, then mints a 15m token + `/pair` link).
 - [x] Verify a live agent response streams through the browser. Confirmed end to end from a device off the local network and off VPN - live agent responses stream through the tunnel (WebSocket).
 - [ ] After validation, do not install a login/boot launch agent. Instead start the stack on demand with a single orchestration script (see Phase 6D). This keeps startup explicit and ordered rather than tied to login.
@@ -626,7 +626,7 @@ Start the whole stack from one script rather than login launch agents. The Mac i
   cloudflared tunnel run t3-code
   ```
 
-  Partially done: `cliproxy/start.sh` covers step 1 only (`docker compose up -d` plus a 30-second poll of `/v1/models`, treating any non-`000` response as up, since an unauthenticated 401 proves the listener is live). Steps 2 and 3 — the T3 backend and the tunnel — are not yet scripted, and neither is the expired-Codex-token check.
+  Partially done: `cliproxy/start.sh` covers step 1 only (`docker compose up -d` plus a 30-second poll of `/v1/models`, treating any non-`000` response as up, since an unauthenticated 401 proves the listener is live). Steps 2 and 3 - the T3 backend and the tunnel - are not yet scripted, and neither is the expired-Codex-token check.
 
 - [ ] Write a matching `stop.sh` that stops the tunnel, stops the T3 backend, and runs `docker compose down` in reverse order. `cliproxy/stop.sh` currently only runs `docker compose down`.
 - [x] Keep `start.sh`/`stop.sh` and `docker-compose.yml` outside this repository, or ensure no secrets (`CLIPROXY_LOCAL_API_KEY`, tunnel credentials) are committed. Read secrets from the environment or a secret store, not literals. Satisfied by the second option: the scripts and compose file are tracked but hold no secrets, and `.gitignore` covers `**/config.yaml`, `**/auth/`, `**/*.log`, and `**/.env*`. Re-verify with `git ls-files cliproxy` after adding tunnel credentials.
@@ -637,7 +637,7 @@ Start the whole stack from one script rather than login launch agents. The Mac i
 - [ ] Prefer the T3 web UI served through `https://code.<domain>` so the UI, Access cookie, API, and WebSocket remain on one origin.
 - [ ] If using T3's hosted UI at `https://app.t3.codes`, use its HTTPS pairing form only after authenticating directly to the backend hostname. The hosted UI connects directly to the backend; it is not a relay.
 - [ ] Treat hosted-UI plus Cloudflare Access as a compatibility gate. Cross-site Access cookies, CORS, or WebSocket authentication may fail under browser privacy settings. Do not weaken Access to fix this; use the same-origin T3 UI or a trusted private-network option instead.
-- [ ] Test from cellular or a network outside the home LAN.
+- [x] Test from cellular or a network outside the home LAN. Verified from a device off the home network and off VPN.
 - [ ] Verify the Mac remains awake, T3 remains running, CLIProxyAPI remains running, and the tunnel reconnects after logout/login or reboot as intended.
 - [ ] Test Access expiry after one hour and confirm reauthentication plus MFA are required as configured.
 - [ ] Revoke the test T3 session with `t3 auth` and verify the browser loses agent access.
@@ -647,12 +647,12 @@ Start the whole stack from one script rather than login launch agents. The Mac i
 - [ ] Only `code.<domain>` routes through the tunnel; unmatched ingress returns 404.
 - [x] CLIProxyAPI is reachable only on `127.0.0.1:8317` and requires the configured local API key. Verified 2026-07-21: the compose mapping is `127.0.0.1:8317:8317` and `lsof` shows only the loopback listener. `remote-management.allow-remote` is `false` with an empty secret, so the management API is off.
 - [x] T3 listens only on loopback unless LAN access is explicitly required. Verified: `127.0.0.1:3773` only.
-- [ ] Cloudflare Access policy allows one exact email/account and denies everyone else by default.
-- [ ] Independent MFA is required.
+- [x] Cloudflare Access policy allows one exact email/account and denies everyone else by default. Single-email include, no Everyone/Bypass; a different account is refused.
+- [~] Independent MFA is required. Not used: MFA is enforced by the Cloudflare account's own 2FA via the Cloudflare IdP (account 2FA on). AMR-based MFA rules only support Okta/Entra/OIDC/SAML, and free-tier Independent MFA availability is unconfirmed. Revisit if the IdP changes.
 - [ ] Access and MFA session durations are short and tested.
-- [ ] T3 pairing URLs are never committed, logged in tickets, or shared in screenshots.
+- [x] T3 pairing URLs are never committed, logged in tickets, or shared in screenshots. Tokens are minted at runtime by `t3-pair.sh` and printed to the terminal only; none are stored in the repo.
 - [ ] Old T3 device sessions are revocable and audited periodically.
-- [x] `~/.codex/auth.json`, the proxy auth directory, the CLIProxyAPI local API key, Cloudflare tunnel credentials, T3 secrets, and any `config.yaml`/`docker-compose.yml`/`start.sh` holding secrets are never added to this repository. Verified 2026-07-21 — `cliproxy/config.yaml` (holds the API key) and `cliproxy/auth/` (holds the Codex OAuth JSON) are both gitignored and untracked. Recheck once tunnel credentials exist; `~/.cloudflared/*.json` lives outside the repo, which is the safer default.
+- [x] `~/.codex/auth.json`, the proxy auth directory, the CLIProxyAPI local API key, Cloudflare tunnel credentials, T3 secrets, and any `config.yaml`/`docker-compose.yml`/`start.sh` holding secrets are never added to this repository. Verified 2026-07-21 - `cliproxy/config.yaml` (holds the API key) and `cliproxy/auth/` (holds the Codex OAuth JSON) are both gitignored and untracked. Recheck once tunnel credentials exist; `~/.cloudflared/*.json` lives outside the repo, which is the safer default.
 - [ ] The public browser provider is run with the least practical agent filesystem/shell permissions. Compromise of this UI is equivalent to remote control of local coding agents.
 - [ ] Cloudflare, T3, proxy (including the pinned CLIProxyAPI Docker image tag), Docker Desktop, Codex CLI, Claude Code, and Node versions are recorded after installation for reproducibility.
 
@@ -660,7 +660,7 @@ Start the whole stack from one script rather than login launch agents. The Mac i
 
 - [x] Does the ChatGPT subscription expose all four mapped GPT IDs through CLIProxyAPI today? Confirmed 2026-07-21 on a ChatGPT Plus account: `/v1/models` returns `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5`, and `gpt-5.4-mini` (plus `gpt-5.6-terra`, `gpt-5.4`, `gpt-5.3-codex-spark`). CLIProxyAPI `v7.2.92`.
 - [ ] Does Claude Code `2.1.215` display all four friendly mapped model names behind the custom base URL? (Names use `_NAME`, which the docs confirm works behind a gateway.)
-- [x] Is `/effort` actually selectable through the proxy? Answered, and the answer differs per client. **CLI:** yes — `ANTHROPIC_DEFAULT_*_SUPPORTED_CAPABILITIES` in the `claudex` wrapper is enough to make Claude Code offer `/effort` on the friendly names. **T3:** not via any proxy or env setting. T3's `claudeAgent` driver only passes `effort` to the Agent SDK for built-in Claude model slugs; a custom model resolves to an empty capability descriptor list, `resolveClaudeEffort` returns `undefined`, and the selection is dropped before the SDK call — the value never leaves T3, so no proxy config can recover it. Worked around by adding a second alias set in `oauth-model-alias` mapping built-in slugs (`claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-5`, `claude-haiku-4-5`, plus `[1m]` variants) onto the same upstream models, which makes T3 attach effort (`low`/`medium`/`high`/`max` → `low`/`medium`/`high`/`xhigh`). The Sonnet route is `claude-sonnet-5`, not `claude-sonnet-4-6`: `normalizeClaudeCliEffort` rewrites `xhigh` → `max` for every slug except `claude-fable-5`, `claude-opus-4-8` and `claude-sonnet-5`, and rewrites `max` → `high` for `claude-sonnet-4-6` alone — so 4.6 silently loses its top effort level while Sonnet 5 passes both `xhigh` and `max` through unchanged. `claude-sonnet-4-6` and `claude-sonnet-4-6[1m]` remain aliased (many aliases can share one upstream id) but are hidden in `.t3/example.client-settings.json`. Sonnet 5 exposes a 200k/1m context selector, so `claude-sonnet-5[1m]` is aliased too; without it the 1M pick returns `502 unknown provider`. Known tradeoff: under those slugs the model believes it is Claude, so self-identification and model-conditional logic are wrong; proxy logs are the only ground truth. Haiku 4.5 has no effort selector in T3, so GPT-5.4 mini gets no effort control there. The Phase 2C `payload.default` baseline does **not** apply as originally assumed — see the correction in 2C.
+- [x] Is `/effort` actually selectable through the proxy? Answered, and the answer differs per client. **CLI:** yes - `ANTHROPIC_DEFAULT_*_SUPPORTED_CAPABILITIES` in the `claudex` wrapper is enough to make Claude Code offer `/effort` on the friendly names. **T3:** not via any proxy or env setting. T3's `claudeAgent` driver only passes `effort` to the Agent SDK for built-in Claude model slugs; a custom model resolves to an empty capability descriptor list, `resolveClaudeEffort` returns `undefined`, and the selection is dropped before the SDK call - the value never leaves T3, so no proxy config can recover it. Worked around by adding a second alias set in `oauth-model-alias` mapping built-in slugs (`claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-5`, `claude-haiku-4-5`, plus `[1m]` variants) onto the same upstream models, which makes T3 attach effort (`low`/`medium`/`high`/`max` -> `low`/`medium`/`high`/`xhigh`). The Sonnet route is `claude-sonnet-5`, not `claude-sonnet-4-6`: `normalizeClaudeCliEffort` rewrites `xhigh` -> `max` for every slug except `claude-fable-5`, `claude-opus-4-8` and `claude-sonnet-5`, and rewrites `max` -> `high` for `claude-sonnet-4-6` alone - so 4.6 silently loses its top effort level while Sonnet 5 passes both `xhigh` and `max` through unchanged. `claude-sonnet-4-6` and `claude-sonnet-4-6[1m]` remain aliased (many aliases can share one upstream id) but are hidden in `.t3/example.client-settings.json`. Sonnet 5 exposes a 200k/1m context selector, so `claude-sonnet-5[1m]` is aliased too; without it the 1M pick returns `502 unknown provider`. Known tradeoff: under those slugs the model believes it is Claude, so self-identification and model-conditional logic are wrong; proxy logs are the only ground truth. Haiku 4.5 has no effort selector in T3, so GPT-5.4 mini gets no effort control there. The Phase 2C `payload.default` baseline does **not** apply as originally assumed - see the correction in 2C.
 - [ ] Does CLIProxyAPI refresh the Codex OAuth token automatically, and what is the observed token lifetime before an on-host `--codex-login` is required?
 - [ ] Does T3 pass `CLAUDE_CONFIG_DIR=/Users/<mac-user>/.claudex` unchanged to the CLIProxyAPI-backed Claude process and keep its sessions separate from native `~/.claude` sessions?
 - [ ] Does the T3 Desktop-managed backend remain reachable from same-host `cloudflared` while Network access is off? Half-answered: with Network access off the backend still binds `127.0.0.1:3773`, which is what a same-host `cloudflared` origin needs. The end-to-end check waits on the tunnel.
@@ -670,34 +670,34 @@ Start the whole stack from one script rather than login launch agents. The Mac i
 
 ## Sources
 
-- [Claude `claudex` setup artifact supplied with the request](https://claude.ai/code/artifact/<TUNNEL_UUID>#no_universal_links) — reviewed from the user-supplied Markdown export; confirms the invocation-scoped proxy pattern
-- [Tibo's CLIProxyAPI/`claudex` post](https://x.com/thsottiaux/status/2076119366647894371) — supplied recipe and environment variables; the user also supplied the full post text because X retrieval was unreliable
-- [CLIProxyAPI repository](https://github.com/router-for-me/CLIProxyAPI) — supported OAuth providers and Anthropic-compatible endpoint
-- [CLIProxyAPI quick start](https://help.router-for.me/introduction/quick-start) — Homebrew installation, executable, service, and default config path
-- [CLIProxyAPI basic configuration](https://help.router-for.me/configuration/basic) — loopback binding, port, management settings, auth directory, and local API keys
-- [CLIProxyAPI Codex OAuth](https://help.router-for.me/configuration/provider/codex) — Codex login and browser callback flow
-- [CLIProxyAPI Claude Code client](https://help.router-for.me/agent-client/claude-code) — `ANTHROPIC_BASE_URL`, client token, Claude Code v2 model variables, and model selection
-- [OpenAI GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model) — Sol/Terra/Luna roles, model IDs, and effort levels
-- [OpenAI GPT-5.5 model](https://developers.openai.com/api/docs/models/gpt-5.5) — exact model ID, snapshot `gpt-5.5-2026-04-23`, and supported effort levels (no `max`)
-- [OpenAI GPT-5.4 mini model](https://developers.openai.com/api/docs/models/gpt-5.4-mini) — exact model ID, subagent/high-volume role, and supported effort levels
-- [OpenAI Codex authentication](https://learn.chatgpt.com/docs/auth) — ChatGPT subscription login, API-key login, caching, and credential storage
-- [OpenAI Codex CLI](https://learn.chatgpt.com/docs/codex/cli) — current standalone installation flow
-- [OpenAI Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc) — native-Claude-orchestrator hybrid option
-- [Claude Code custom subagents](https://code.claude.com/docs/en/sub-agents) — agent files, full model IDs, and `CLAUDE_CODE_SUBAGENT_MODEL` precedence
-- [Claude Code `.claude` directory](https://code.claude.com/docs/en/claude-directory) — `CLAUDE_CONFIG_DIR` as the supported override for the default `~/.claude` configuration directory
-- [Claude Code model configuration](https://code.claude.com/docs/en/model-config) — Fable/Opus/Sonnet/Haiku aliases, custom display names, gateway model IDs, and per-model effort capabilities
-- [Claude Code memory](https://code.claude.com/docs/en/memory) — `CLAUDE.md` behavior and importing `AGENTS.md`
-- [Claude model IDs](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions) — `claude-opus-4-8` and `claude-sonnet-5`
-- [T3 Code README](https://github.com/pingdotgg/t3code) — supported providers, Desktop installation, and CLI entrypoint
-- [T3 Code Claude provider guide](https://github.com/pingdotgg/t3code/blob/main/docs/providers/claude.md) — multiple Claude homes and provider environment variables
-- [T3 Code Codex provider guide](https://github.com/pingdotgg/t3code/blob/main/docs/providers/codex.md) — Codex home, login, and provider behavior
-- [T3 Code remote access guide](https://github.com/pingdotgg/t3code/blob/main/REMOTE.md) — port examples, serving, pairing, hosted UI, WebSockets, and session revocation
-- [Cloudflare Tunnel downloads](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) — macOS installation
-- [Cloudflare locally managed Tunnel](https://developers.cloudflare.com/tunnel/advanced/local-management/create-local-tunnel/) — login, create, config, DNS route, and run
-- [Cloudflare Tunnel DNS records](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/dns/) — CNAME behavior
-- [Cloudflare Tunnel configuration](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/configuration-file/) — ingress rules and validation
-- [Cloudflare Access policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/) — exact email selectors and dangerous broad-policy examples
-- [Cloudflare MFA enforcement](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/mfa-requirements/) — independent MFA and session duration
-- [Cloudflare Access session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/) — application, policy, and MFA sessions
-- [Cloudflare Tunnel WebSocket support](https://developers.cloudflare.com/cloudflare-one/faq/cloudflare-tunnels-faq/) — WebSocket compatibility
-- [Cloudflare Tunnel macOS service](https://developers.cloudflare.com/tunnel/advanced/local-management/as-a-service/macos/) — login launch agent versus boot daemon
+- [Claude `claudex` setup artifact supplied with the request](https://claude.ai/code/artifact/<TUNNEL_UUID>#no_universal_links) - reviewed from the user-supplied Markdown export; confirms the invocation-scoped proxy pattern
+- [Tibo's CLIProxyAPI/`claudex` post](https://x.com/thsottiaux/status/2076119366647894371) - supplied recipe and environment variables; the user also supplied the full post text because X retrieval was unreliable
+- [CLIProxyAPI repository](https://github.com/router-for-me/CLIProxyAPI) - supported OAuth providers and Anthropic-compatible endpoint
+- [CLIProxyAPI quick start](https://help.router-for.me/introduction/quick-start) - Homebrew installation, executable, service, and default config path
+- [CLIProxyAPI basic configuration](https://help.router-for.me/configuration/basic) - loopback binding, port, management settings, auth directory, and local API keys
+- [CLIProxyAPI Codex OAuth](https://help.router-for.me/configuration/provider/codex) - Codex login and browser callback flow
+- [CLIProxyAPI Claude Code client](https://help.router-for.me/agent-client/claude-code) - `ANTHROPIC_BASE_URL`, client token, Claude Code v2 model variables, and model selection
+- [OpenAI GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model) - Sol/Terra/Luna roles, model IDs, and effort levels
+- [OpenAI GPT-5.5 model](https://developers.openai.com/api/docs/models/gpt-5.5) - exact model ID, snapshot `gpt-5.5-2026-04-23`, and supported effort levels (no `max`)
+- [OpenAI GPT-5.4 mini model](https://developers.openai.com/api/docs/models/gpt-5.4-mini) - exact model ID, subagent/high-volume role, and supported effort levels
+- [OpenAI Codex authentication](https://learn.chatgpt.com/docs/auth) - ChatGPT subscription login, API-key login, caching, and credential storage
+- [OpenAI Codex CLI](https://learn.chatgpt.com/docs/codex/cli) - current standalone installation flow
+- [OpenAI Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc) - native-Claude-orchestrator hybrid option
+- [Claude Code custom subagents](https://code.claude.com/docs/en/sub-agents) - agent files, full model IDs, and `CLAUDE_CODE_SUBAGENT_MODEL` precedence
+- [Claude Code `.claude` directory](https://code.claude.com/docs/en/claude-directory) - `CLAUDE_CONFIG_DIR` as the supported override for the default `~/.claude` configuration directory
+- [Claude Code model configuration](https://code.claude.com/docs/en/model-config) - Fable/Opus/Sonnet/Haiku aliases, custom display names, gateway model IDs, and per-model effort capabilities
+- [Claude Code memory](https://code.claude.com/docs/en/memory) - `CLAUDE.md` behavior and importing `AGENTS.md`
+- [Claude model IDs](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions) - `claude-opus-4-8` and `claude-sonnet-5`
+- [T3 Code README](https://github.com/pingdotgg/t3code) - supported providers, Desktop installation, and CLI entrypoint
+- [T3 Code Claude provider guide](https://github.com/pingdotgg/t3code/blob/main/docs/providers/claude.md) - multiple Claude homes and provider environment variables
+- [T3 Code Codex provider guide](https://github.com/pingdotgg/t3code/blob/main/docs/providers/codex.md) - Codex home, login, and provider behavior
+- [T3 Code remote access guide](https://github.com/pingdotgg/t3code/blob/main/REMOTE.md) - port examples, serving, pairing, hosted UI, WebSockets, and session revocation
+- [Cloudflare Tunnel downloads](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) - macOS installation
+- [Cloudflare locally managed Tunnel](https://developers.cloudflare.com/tunnel/advanced/local-management/create-local-tunnel/) - login, create, config, DNS route, and run
+- [Cloudflare Tunnel DNS records](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/dns/) - CNAME behavior
+- [Cloudflare Tunnel configuration](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/configuration-file/) - ingress rules and validation
+- [Cloudflare Access policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/) - exact email selectors and dangerous broad-policy examples
+- [Cloudflare MFA enforcement](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/mfa-requirements/) - independent MFA and session duration
+- [Cloudflare Access session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/) - application, policy, and MFA sessions
+- [Cloudflare Tunnel WebSocket support](https://developers.cloudflare.com/cloudflare-one/faq/cloudflare-tunnels-faq/) - WebSocket compatibility
+- [Cloudflare Tunnel macOS service](https://developers.cloudflare.com/tunnel/advanced/local-management/as-a-service/macos/) - login launch agent versus boot daemon

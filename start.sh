@@ -153,9 +153,4 @@ echo "minting pairing token ..."
 # --- j. summary ---
 cat <<EOF
 
---- operational details ---
-main URL:   https://$T3_HOSTNAME  (Cloudflare Access, then T3 pairing)
-new logs:   $CLOUDFLARED_LOG   $T3_SERVE_LOG
-pairing:    ready; scroll up to T3 PAIRING for the code, full URL, and QR.
-expires:    the pairing code lasts $TTL.
 EOF

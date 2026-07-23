@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 # Start the proxy and wait for the loopback listener.
 set -euo pipefail
+umask 077
 cd "$(dirname "$0")"
+. ../scripts/env.sh
 
 [ -f config.yaml ] || { echo "config.yaml missing. Run: cp example.config.yaml config.yaml and set your api-key."; exit 1; }
+
+harden_proxy_files() {
+  codelaunch_private_file config.yaml
+  codelaunch_private_tree auth
+}
+harden_proxy_files
+trap harden_proxy_files EXIT
 
 docker compose up -d
 

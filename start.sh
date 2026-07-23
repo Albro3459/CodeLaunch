@@ -5,19 +5,25 @@
 #   ./start.sh            # 15m pairing token (default)
 #   ./start.sh 5m         # custom TTL, passed to t3-pair.sh
 #
-# Order: prereqs, caffeinate, Docker, Codex token, proxy, tunnel, T3 backend + token.
+# Order: prereqs, caffeinate, Docker, Codex token, proxy, T3 backend, tunnel, token.
 # See SETUP.md "Step 5" and QUICK-SETUP.md.
 set -euo pipefail
+umask 077
 cd "$(dirname "$0")"
+. ./scripts/env.sh
 
 TTL="${1:-15m}"
 
 # --- a. env ---
-[ -f .env ] || { echo ".env missing. Run: cp .env.example .env and fill it in."; exit 1; }
-set -a; . ./.env; set +a
-: "${T3_HOSTNAME:?set T3_HOSTNAME in .env}"
-: "${T3_PORT:?set T3_PORT in .env}"
-: "${TUNNEL_NAME:?set TUNNEL_NAME in .env}"
+codelaunch_private_file .env
+codelaunch_load_env T3_HOSTNAME T3_PORT T3_CHANNEL T3_CHANNEL_SKIP_CHECK TUNNEL_NAME
+codelaunch_require_env T3_HOSTNAME T3_PORT TUNNEL_NAME
+codelaunch_private_file cliproxy/config.yaml
+codelaunch_private_tree cliproxy/auth
+codelaunch_prepare_runtime
+CLOUDFLARED_LOG="$CODELAUNCH_RUNTIME_DIR/cloudflared-t3.log"
+T3_SERVE_LOG="$CODELAUNCH_RUNTIME_DIR/t3-serve.log"
+export T3_SERVE_LOG
 
 # --- b. prereqs (collect all missing, fail once) ---
 missing=()
@@ -114,35 +120,39 @@ if ! curl -fsS -H "Authorization: Bearer $KEY" http://127.0.0.1:8317/v1/models >
 fi
 echo "proxy up and key accepted"
 
-# --- g. tunnel ---
-# Tunnel comes up before the T3 backend so the pair link works right away.
+# --- g. T3 backend ---
+echo "ensuring T3 backend ..."
+./t3-pair.sh --ensure-only
+
+# --- h. tunnel ---
 if pgrep -f "cloudflared tunnel run" >/dev/null; then
   echo "tunnel already running (reusing)"
 else
   echo "starting tunnel $TUNNEL_NAME ..."
-  nohup cloudflared tunnel run "$TUNNEL_NAME" > /tmp/cloudflared-t3.log 2>&1 &
+  codelaunch_reset_private_log "$CLOUDFLARED_LOG"
+  nohup cloudflared tunnel run "$TUNNEL_NAME" >"$CLOUDFLARED_LOG" 2>&1 &
   for _ in $(seq 1 30); do
-    grep -q "Registered tunnel connection" /tmp/cloudflared-t3.log 2>/dev/null && break
+    grep -q "Registered tunnel connection" "$CLOUDFLARED_LOG" 2>/dev/null && break
     sleep 1
   done
-  if ! grep -q "Registered tunnel connection" /tmp/cloudflared-t3.log 2>/dev/null; then
+  if ! grep -q "Registered tunnel connection" "$CLOUDFLARED_LOG" 2>/dev/null; then
     echo "tunnel did not register within 30s; last log lines:"
-    tail -20 /tmp/cloudflared-t3.log
+    tail -20 "$CLOUDFLARED_LOG"
     exit 1
   fi
   echo "tunnel registered"
 fi
 
-# --- h. T3 backend + one-time pairing token ---
-echo "ensuring T3 backend + minting pairing token ..."
+# --- i. one-time pairing token ---
+echo "minting pairing token ..."
 ./t3-pair.sh "$TTL"
 
-# --- i. summary ---
+# --- j. summary ---
 cat <<EOF
 
 --- operational details ---
 main URL:   https://$T3_HOSTNAME  (Cloudflare Access, then T3 pairing)
-logs:       /tmp/cloudflared-t3.log   /tmp/t3-serve.log
+new logs:   $CLOUDFLARED_LOG   $T3_SERVE_LOG
 pairing:    ready; scroll up to T3 PAIRING for the code, full URL, and QR.
 expires:    the pairing code lasts $TTL.
 EOF

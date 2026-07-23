@@ -23,24 +23,29 @@ without `caffeinate`, it stops.
 
 Either open the Pair URL, navigate to your URL directly and paste the token, or scan the QR code with a phone camera.
 
-If the Codex sign-in has expired, `start.sh` opens the browser login first, otherwise it reuses the running services.
+If the Codex sign-in has expired, `start.sh` opens the browser login first, otherwise it reuses the running services. It ensures the loopback T3 backend before starting the Cloudflare tunnel, then mints the pairing token after the tunnel is ready.
 
 ## Stop
 
 ```bash
-./stop.sh             # tunnel, T3 backend, claudex sessions, proxy, caffeinate
+./stop.sh             # tunnel, T3 backend, claudex sessions, proxy
 ```
 
-Leaves Docker Desktop and native Claude Code running.
+Leaves Docker Desktop, native Claude Code, and `caffeinate -dims` running. Keeping
+the sleep assertion avoids losing SSH access between a remote stop and restart;
+`start.sh` reuses it instead of starting a duplicate.
 
 ## Useful
 
 ```bash
-. ./.env                             # T3_CHANNEL must match the desktop app
+. ./scripts/env.sh
+codelaunch_load_env T3_CHANNEL       # must match the desktop app
 npx "t3@$T3_CHANNEL" auth session list      # active device sessions
 npx "t3@$T3_CHANNEL" auth pairing list      # outstanding pairing tokens
 npx "t3@$T3_CHANNEL" auth pairing revoke <id>   # kill one
 ./cliproxy/login.sh                  # manual Codex re-auth (on-host, browser)
 ```
 
-Logs: `/tmp/cloudflared-t3.log`, `/tmp/t3-serve.log`.
+Newly started processes log to `$HOME/.codelaunch/run/cloudflared-t3.log`
+and `$HOME/.codelaunch/run/t3-serve.log` (private to your user). Existing
+processes keep their current log files until you stop and restart them.

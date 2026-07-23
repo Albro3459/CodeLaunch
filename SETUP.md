@@ -16,7 +16,11 @@ set, locking the screen and closing the lid survive as long as the Mac stays on 
 Prereq: Docker Desktop running (`docker version`, `docker compose version`).
 
 ```bash
+umask 077
 cp cliproxy/example.config.yaml cliproxy/config.yaml
+mkdir -p cliproxy/auth
+chmod 600 cliproxy/config.yaml
+chmod 700 cliproxy/auth
 openssl rand -hex 32                      # generate a key, paste into config.yaml api-keys
 ```
 
@@ -64,7 +68,7 @@ export CLIPROXY_LOCAL_API_KEY=<KEY>       # keep out of the repo
 ```
 
 Notes:
-- `config.yaml` and `cliproxy/auth/` are gitignored (key + OAuth creds). Never commit them. The alias/effort setup itself *is* in git - `example.config.yaml` is identical to `config.yaml` apart from the placeholder key and a leading comment, so a lost `config.yaml` is one `cp` away from working. The local API key is regenerable in seconds (`openssl rand -hex 32`). Only the Codex OAuth credentials under `auth/` need a re-login to replace. Keep `example.config.yaml` in sync whenever `config.yaml` changes.
+- `config.yaml` and `cliproxy/auth/` are gitignored (key + OAuth creds). Never commit them. Keep `.env`, `config.yaml`, and auth files mode `600`, and auth directories mode `700`; `start.sh`, `cliproxy/start.sh`, and `cliproxy/login.sh` enforce this on future runs. The alias/effort setup itself *is* in git - `example.config.yaml` is identical to `config.yaml` apart from the placeholder key and a leading comment, so a lost `config.yaml` is one `cp` away from working. The local API key is regenerable in seconds (`openssl rand -hex 32`). Only the Codex OAuth credentials under `auth/` need a re-login to replace. Keep `example.config.yaml` in sync whenever `config.yaml` changes.
 - **Aliases replace the upstream id, but many aliases can share one id.** After aliasing, the raw id returns `unknown provider`. Unaliased models keep their own ids. Keep `oauth-model-alias` in sync with `ANTHROPIC_DEFAULT_*_MODEL` in `../claudex`, or role lookups fail with a `502 unknown provider` that Claude Code retries as if it were transient. `customModels` in `~/.t3/userdata/settings.json` does **not** need to match - T3 lists built-in Claude models regardless, and custom entries there are actively harmful (Step 3).
 - **`config.yaml` edits need a container restart.** The file is a read-only bind mount (`./config.yaml:/CLIProxyAPI/config.yaml:ro`), and the process reads it at startup. Run `./cliproxy/stop.sh` then `./cliproxy/start.sh` (`docker compose down`, then `up -d` plus the listener poll). `start.sh` on its own does not recreate an already-running container, so the old alias table stays live.
 - **An alias differing only by case is ignored, with no warning.** `gpt-5.6-luna` -> `GPT-5.6-Luna` is a no-op with nothing logged and the original left in place. `GPT-5.6 Luna` works. Every alias must differ by a real character, which is why `GPT 5.5` carries a space.
@@ -394,7 +398,8 @@ The API path, for reference (token was a scoped, short-lived custom token with
 `Cloudflare Tunnel` edit, and zone `DNS` edit):
 
 ```bash
-set -a; . ./.env; set +a
+. ./scripts/env.sh
+codelaunch_load_env T3_HOSTNAME T3_PORT TUNNEL_NAME ACCESS_EMAIL CLOUDFLARE_TEAM
 CF=$(tr -d '[:space:]' < ~/.ssh/CloudFlare_API_KEY/cloudflare-tunnel-api.key)
 H="Authorization: Bearer $CF"
 
@@ -422,7 +427,9 @@ curl -s -X POST ".../zones/$ZONE/dns_records" -H "$H" \
 Real values live in `.env` (gitignored), not in this file:
 
 ```bash
-cp .env.example .env      # then fill in, and export for the commands below
+umask 077
+cp .env.example .env      # then fill in, and load for the commands below
+chmod 600 .env
 ```
 
 Order is load-bearing: **Access first, DNS and tunnel second.** Creating the DNS
@@ -473,7 +480,8 @@ commands would run with empty strings substituted in. Load it explicitly, from
 the repo root, in every shell that runs a Step 4 command:
 
 ```bash
-set -a; . ./.env; set +a
+. ./scripts/env.sh
+codelaunch_load_env T3_HOSTNAME T3_PORT TUNNEL_NAME ACCESS_EMAIL CLOUDFLARE_TEAM
 ```
 
 **T3 must already be serving on `$T3_PORT`.** `cloudflared tunnel run` connects
@@ -593,7 +601,9 @@ all listeners are on loopback, and prints a structured pairing block with the co
 complete URL, expiration, and an optional terminal QR. `jq` is required for
 that structured output; install it with `brew install jq`. `qrencode` is
 recommended but optional (`brew install qrencode`); pairing still succeeds
-without it or if QR rendering fails.
+without it or if QR rendering fails. Newly started headless backends write to the
+private `$HOME/.codelaunch/run/t3-serve.log` file; an already-running process
+keeps its current log until it is restarted.
 
 ```bash
 ./t3-pair.sh            # 15m token (default)
@@ -611,9 +621,10 @@ tested while the desktop app owns the port, so test it with the app closed.
 `./start.sh [ttl]` brings the stack up in order, each step gated on a health
 check and idempotent so a live stack short-circuits to reuse:
 
-1. **prereqs** - `.env` loaded. `docker`, `cloudflared`, `claude`, `claudex`,
-   `npx`, and required `jq` all checked on PATH (all missing reported at once);
-   `qrencode` remains optional for terminal QR rendering.
+1. **prereqs** - `.env` is parsed by `scripts/env.sh`, which accepts only the
+   expected variables and never executes it as shell code. `docker`, `cloudflared`,
+   `claude`, `claudex`, `npx`, and required `jq` are checked on PATH (all missing
+   reported at once); `qrencode` remains optional for terminal QR rendering.
 2. **caffeinate** - warns (not fails) off AC power, and starts `caffeinate -dims`
    if none is running. It cannot enable Wake for network access - that stays a
    manual `pmset`/System Settings step (`pmset -g | grep womp` must read `1`).
@@ -629,28 +640,31 @@ check and idempotent so a live stack short-circuits to reuse:
 5. **cliproxy** - `./cliproxy/start.sh`, then an authenticated
    `curl /v1/models` with the key grepped from `config.yaml`. A rejected key
    fails loudly.
-6. **tunnel** - reuse if `cloudflared tunnel run` is already up, else launch it
-   to `/tmp/cloudflared-t3.log` and poll for `Registered tunnel connection` (up
-   to 30s, printing `tail -20` on timeout). It starts just before the backend
-   since Access fronts the hostname, so this deviates from the "T3 first"
-   ordering by only seconds and keeps the printed pair link immediately usable.
-7. **backend + token** - `./t3-pair.sh [ttl]` reuses or starts the loopback T3
-   backend (refusing `0.0.0.0`) and mints the one-time pairing token.
+6. **backend** - `./t3-pair.sh --ensure-only` reuses or starts the loopback T3
+   backend, verifies that a live process owns the port, and refuses non-loopback
+   listeners before the public tunnel starts.
+7. **tunnel** - reuse if `cloudflared tunnel run` is already up, else launch it
+   to `$HOME/.codelaunch/run/cloudflared-t3.log` and poll for `Registered tunnel
+   connection` (up to 30s, printing `tail -20` on timeout). Reused processes keep
+   their existing log destination until restarted.
+8. **pairing token** - `./t3-pair.sh [ttl]` rechecks the backend and mints the
+   one-time token only after the tunnel is ready.
 
-`./stop.sh` reverses it and leaves **Docker Desktop, the Docker daemon, and
-native Claude Code** running on purpose:
+`./stop.sh` reverses it and leaves **Docker Desktop, the Docker daemon, native
+Claude Code, and `caffeinate -dims`** running on purpose:
 
 - **tunnel** - SIGTERM via `pkill`, wait up to 35s for the 30s cloudflared grace,
   then a second signal forces immediate exit.
 - **T3 backend** - the PID listening on `$T3_PORT`. If its command path contains
-  `T3 Code` it is Desktop-managed and gets quit with
-  `osascript -e 'quit app "T3 Code (Nightly)"'`, otherwise (headless `t3 serve`)
-  SIGTERM then SIGKILL as a last resort.
+  a desktop app bundle, its app name is passed to AppleScript as an argument for
+  a graceful quit; otherwise the headless `t3 serve` gets SIGTERM then SIGKILL
+  as a last resort.
 - **claudex sessions** - matched by the literal `CLAUDE_CONFIG_DIR=$HOME/.claudex`
   in the process **environment** (`ps eww` appends env vars). Native Claude Code
   lacks that marker, so it is never touched. SIGTERM only.
 - **cliproxy** - `./cliproxy/stop.sh` (`docker compose down`), skipped with a
   note if docker is unreachable.
-- **caffeinate** - `pkill -f 'caffeinate -dims'`.
+- **caffeinate** - intentionally left running so a remote stop does not release
+  the sleep assertion before SSH can start the stack again. `start.sh` reuses it.
 
 Every kill is guarded with `|| true` so re-runs are clean no-ops.

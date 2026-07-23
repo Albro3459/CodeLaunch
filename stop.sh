@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Tears the remote-agent stack down in reverse order and guards each kill so a re-run is a clean no-op.
-# Leaves Docker Desktop, the daemon, and native Claude Code sessions running - see SETUP.md "Step 5" for details.
+# Leaves Docker Desktop, the daemon, native Claude Code sessions, and caffeinate running - see SETUP.md "Step 5" for details.
 set -euo pipefail
+umask 077
 cd "$(dirname "$0")"
+. ./scripts/env.sh
 
 # --- a. env (defaults if .env is gone) ---
-if [ -f .env ]; then set -a; . ./.env; set +a; fi
+codelaunch_private_file .env
+codelaunch_load_env --optional T3_PORT TUNNEL_NAME
 : "${T3_PORT:=3773}"
 : "${TUNNEL_NAME:=t3-code}"
 
@@ -41,7 +44,12 @@ if [ -z "$t3_pid" ]; then
   echo "no T3 backend listening on :$T3_PORT"
 elif [ -n "$app_name" ]; then
   echo "quitting T3 Desktop app \"$app_name\" (PID $t3_pid) ..."
-  osascript -e "quit app \"$app_name\"" || true
+  osascript - "$app_name" <<'APPLESCRIPT' || true
+on run argv
+  set targetApp to item 1 of argv
+  tell application targetApp to quit
+end run
+APPLESCRIPT
   for _ in $(seq 1 15); do
     kill -0 "$t3_pid" 2>/dev/null || break
     sleep 1
@@ -82,13 +90,5 @@ else
   echo "docker not reachable - skipping proxy stop"
 fi
 
-# --- f. caffeinate ---
-if pgrep -f 'caffeinate -dims' >/dev/null; then
-  pkill -f 'caffeinate -dims' || true
-  echo "stopped caffeinate (display/idle assertions released)"
-else
-  echo "no caffeinate to stop"
-fi
-
-# --- g. left running on purpose ---
-echo "left running: Docker Desktop + daemon, native Claude Code sessions"
+# --- f. left running on purpose ---
+echo "left running: Docker Desktop + daemon, native Claude Code sessions, caffeinate"

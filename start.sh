@@ -114,8 +114,11 @@ fi
 # --- f. proxy ---
 echo "starting proxy ..."
 ./cliproxy/start.sh
-KEY=$(grep -oE '[0-9a-f]{64}' cliproxy/config.yaml | head -1)
-if ! curl -fsS -H "Authorization: Bearer $KEY" http://127.0.0.1:8317/v1/models >/dev/null 2>&1; then
+KEY=$(grep -oE '[0-9a-f]{64}' cliproxy/config.yaml | head -1 || true)
+[ -n "$KEY" ] || { echo "no local API key found in cliproxy/config.yaml"; exit 1; }
+# Key goes to curl via stdin (-K -), not argv, so it never shows in ps.
+if ! printf 'header = "Authorization: Bearer %s"\n' "$KEY" \
+  | curl -fsS -K - http://127.0.0.1:8317/v1/models >/dev/null 2>&1; then
   echo "proxy up but local API key rejected - check cliproxy/config.yaml"; exit 1
 fi
 echo "proxy up and key accepted"

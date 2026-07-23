@@ -110,7 +110,7 @@ if listening >/dev/null; then
 else
   echo "starting headless T3 backend ($PKG) on 127.0.0.1:$T3_PORT ..."
   codelaunch_reset_private_log "$T3_SERVE_LOG"
-  npx --yes "$PKG" serve --host 127.0.0.1 --port "$T3_PORT" >"$T3_SERVE_LOG" 2>&1 &
+  nohup npx --yes "$PKG" serve --host 127.0.0.1 --port "$T3_PORT" >"$T3_SERVE_LOG" 2>&1 &
   for _ in $(seq 1 30); do
     listening >/dev/null && break
     sleep 1

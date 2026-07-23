@@ -138,8 +138,8 @@ GPT-5.5 / GPT-5.4 mini in the logs (not just the agent's self-report).
 Install the desktop app and confirm the CLI entrypoint:
 
 ```bash
-brew install --cask t3-code
-npx --yes t3@latest --version
+brew install --cask t3-code             # stable; nightly channel: t3-code@nightly
+npx --yes t3@$T3_CHANNEL --version      # channel must match the cask you installed
 ```
 
 The app keeps the old `T3 Code (Alpha)` name internally as
@@ -184,7 +184,7 @@ correct regardless of `T3_CHANNEL`.
 npm carries both dist-tags (`npm view t3 dist-tags`): `latest` is `0.0.28` and
 `nightly` is `0.0.29-nightly.*`. `.env.example` ships `latest` because a fresh
 setup should use the stable channel. Set `T3_CHANNEL=nightly` in `.env` if
-you're running the nightly cask.
+you're running the nightly cask (`t3-code@nightly`).
 
 Configure two providers in T3 Desktop.
 
@@ -376,7 +376,7 @@ Network access off. Re-check after a cask auto-update. If this ever shows
 Headless fallback, if Desktop's managed backend does not work out:
 
 ```bash
-npx --yes t3@latest serve --host 127.0.0.1
+npx --yes t3@$T3_CHANNEL serve --host 127.0.0.1
 ```
 
 Run only one backend at a time. Pairing tokens and sessions are managed with
@@ -491,7 +491,7 @@ up after authenticating: expect Cloudflare error 1033 when no tunnel is running
 or the hostname is misrouted, and a 502 only once the tunnel is up but the origin
 port is dead. Start Desktop (or the headless backend) first and confirm with
 `lsof` as in Step 3. The headless entrypoint is
-`npx --yes t3@latest serve --host 127.0.0.1`. Test that command on its own before
+`npx --yes t3@$T3_CHANNEL serve --host 127.0.0.1`. Test that command on its own before
 relying on it.
 
 ### 4A. Access policy (dashboard, before any ingress)

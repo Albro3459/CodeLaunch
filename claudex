@@ -16,7 +16,8 @@ CONFIG="$SCRIPT_DIR/cliproxy/config.yaml"
 
 KEY="${CLIPROXY_LOCAL_API_KEY:-}"
 if [ -z "$KEY" ] && [ -f "$CONFIG" ]; then
-  KEY="$(grep -oE '[0-9a-f]{64}' "$CONFIG" | head -1)"
+  # `|| true` guards set -e/pipefail: grep exits 1 on no match and can take SIGPIPE from head.
+  KEY="$(grep -oE '[0-9a-f]{64}' "$CONFIG" | head -1 || true)"
 fi
 [ -z "$KEY" ] && { echo "No local API key. Set CLIPROXY_LOCAL_API_KEY or add it to $CONFIG"; exit 1; }
 

@@ -107,13 +107,15 @@ codelaunch_load_env() {
     esac
     case "$line" in
       *=*) ;;
-      *) echo "$env_file:$line_number: expected KEY=value" >&2; return 1 ;;
+      *) continue ;;
     esac
 
     key=${line%%=*}
     raw_value=${line#*=}
     codelaunch_trim "$key"
     key=$CODELAUNCH_VALUE
+    # Only the requested keys are parsed; anything else in .env is ignored.
+    codelaunch_requested_env "$key" "$@" || continue
     if [[ ! "$key" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
       echo "$env_file:$line_number: invalid variable name '$key'" >&2
       return 1
@@ -127,10 +129,8 @@ codelaunch_load_env() {
       return 1
     }
     value=$CODELAUNCH_VALUE
-    if codelaunch_requested_env "$key" "$@"; then
-      printf -v "$key" '%s' "$value"
-      export "$key"
-    fi
+    printf -v "$key" '%s' "$value"
+    export "$key"
   done < "$env_file"
 }
 

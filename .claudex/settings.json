@@ -6,7 +6,6 @@
   },
   "permissions": {
     "allow": [
-      "Bash(br0wser *)",
       "Bash(git status *)",
       "Bash(git diff *)",
       "Bash(git log *)",
@@ -103,7 +102,6 @@
       "Bash(ping *)",
       "Bash(./scripts/test.sh *)",
       "Bash(trash scripts/__pycache__)",
-      "Bash(docker exec lr-data psql -U postgres -d merlin -c *)",
       "Edit(/.claudex/worktrees/**)",
       "Read(//private/tmp/**)",
       "Read(//tmp/**)",

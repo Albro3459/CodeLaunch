@@ -16,22 +16,26 @@ Tested on an ARM Mac (macOS 26.x), working end to end from off-network devices, 
   />
 </p>
 
-#### T3 Code Everywhere
+#### T3 Code Remote Control
 
-<table>
+<p align="center">
+  <img
+    src="https://github.com/user-attachments/assets/f3b13d12-4650-4609-be0e-618bef6e66ed"
+    alt="T3 Code in the Browser"
+    width="640"
+  />
+  <img
+    src="https://github.com/user-attachments/assets/590268ab-e354-4a6c-9214-0ae50869f120"
+    alt="T3 Code on mobile"
+    width="218"
+  />
+</p>
+
+#### Mobile Demo
+
+<table align="center">
   <tr>
-    <th align="center">Browser</th>
-    <th align="center">Mobile</th>
-  </tr>
-  <tr>
-    <td align="center" valign="top">
-      <img
-        src="https://github.com/user-attachments/assets/f3b13d12-4650-4609-be0e-618bef6e66ed"
-        alt="T3 Code in the Browser"
-        width="650"
-      />
-    </td>
-    <td align="center" valign="top">
+    <td align="center">
       <video
         src="https://github.com/user-attachments/assets/32ff7ce2-fc4a-4eee-9fe8-e6e83ab5655e"
         width="220"

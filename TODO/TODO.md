@@ -7,15 +7,7 @@ off-network devices.
 
 ## Open
 
-- [x] Verify `start.sh`'s headless path end to end: with the Desktop app fully
-  quit, let the script start `t3 serve` and confirm remote pairing + streaming
-  work the same. Verified: with Desktop quit, `start.sh` starts the headless
-  `t3 serve` backend and remote pairing + streaming behave the same as the
-  reuse path.
-- [x] Pin the CLIProxyAPI image to a version tag or digest instead of
-  `eceasy/cli-proxy-api:latest` (currently resolves to `v7.2.92`). Pinned by
-  digest (`sha256:af18f6fb364bfb7b482a1ca6c6c85fd7df2c0d6a3a497ebb82c337ac2216dc41`,
-  v7.2.92) since tags stay mutable upstream.
+_Nothing open._
 
 ## Recurring
 

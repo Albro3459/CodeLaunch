@@ -11,7 +11,7 @@
         },
         {
             "provider": "claudeAgent",
-            "model": "claude-opus-4-8"
+            "model": "claude-opus-5"
         },
         {
             "provider": "claudex",
@@ -19,12 +19,13 @@
         },
         {
             "provider": "claudex",
-            "model": "claude-opus-4-8"
+            "model": "claude-opus-5"
         }
     ],
     "providerModelPreferences": {
         "claudex": {
             "hiddenModels": [
+                "claude-opus-4-8",
                 "claude-opus-4-7",
                 "claude-opus-4-6",
                 "claude-opus-4-5",
@@ -34,6 +35,7 @@
         },
         "claudeAgent": {
             "hiddenModels": [
+                "claude-opus-4-8",
                 "claude-opus-4-7",
                 "claude-opus-4-6",
                 "claude-opus-4-5",

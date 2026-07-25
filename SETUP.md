@@ -57,9 +57,9 @@ The image is pinned by digest in `docker-compose.yml` rather than by `latest` or
 Models are exposed under two sets of aliases (`oauth-model-alias`), and the raw upstream ids no longer route:
 
 - **Friendly names** - `GPT-5.6 Sol`, `GPT-5.6 Luna`, `GPT 5.5`, `GPT 5.4 mini`. Required by the `ANTHROPIC_DEFAULT_*_MODEL` role mappings in `claudex`, and the only labels that clearly show which model is actually serving you.
-- **Claude slugs** - `claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-5`, `claude-haiku-4-5` and friends, each pointing at the same upstream model as its friendly counterpart. These exist only so T3 will pass reasoning effort. See Step 3.
+- **Claude slugs** - `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-haiku-4-5` and friends, each pointing at the same upstream model as its friendly counterpart. These exist only so T3 will pass reasoning effort. See Step 3.
 
-One upstream id can carry many aliases and they all coexist - `/v1/models` lists all 16. Use the friendly names from the CLI and the Claude slugs from T3.
+One upstream id can carry many aliases and they all coexist - `/v1/models` lists all 18. Use the friendly names from the CLI and the Claude slugs from T3.
 
 Export the key for later steps (Claude Code / T3):
 
@@ -268,9 +268,12 @@ real path.
 
 `example.client-settings.json` carries picker state rather than provider config:
 favorites for `claudeAgent` and `claudex` on `claude-fable-5` and
-`claude-opus-4-8`, plus `providerModelPreferences.claudex.hiddenModels`, which
-hides `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5` and
-`claude-sonnet-4-6` from the claudex picker.
+`claude-opus-5`, plus `providerModelPreferences.claudex.hiddenModels`, which
+hides `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5`
+and `claude-sonnet-4-6` from the claudex picker.
+
+The Opus 5 row needs Claude Code >= 2.1.219; below that T3 filters it out of the
+picker entirely and shows an upgrade message instead.
 
 `claude-sonnet-5` stays **visible**: it is the Sonnet route to GPT-5.5, and it is
 also `DEFAULT_MODEL_BY_PROVIDER[claudeAgent]`, so a fresh claudex thread lands on
@@ -280,18 +283,29 @@ default / 1m) and picking 1M makes T3 send the id with `[1m]` appended. Without
 the second alias, that selection returns `502 unknown provider`, which Claude Code
 retries as if it were transient.
 
-`claude-opus-4-7` and `claude-opus-4-5` are duplicate aliases of Luna, so hiding
-them only removes clutter. The other two each cost something:
+`claude-opus-5` is the Opus row to use, and the other four are hidden. It is the
+only Opus slug that is both exempt from the `xhigh` -> `max` rewrite below *and*
+carries a `contextWindow` selector (200k/1m, defaulting to **1M**), so it
+strictly supersedes them:
 
-- `claude-opus-4-6` is the only Opus row that exposes a `contextWindow` selector
-  (200k/1m). `claude-opus-4-8` has none. `config.yaml` aliases
-  `claude-opus-4-6[1m]`, so hiding it gives up the only 1M-context route to Luna
-  in T3. Accepted tradeoff.
-- `claude-sonnet-4-6` is still aliased to GPT-5.5 and works, but `claude-sonnet-5`
-  supersedes it: 4.6 is the one slug where `normalizeClaudeCliEffort` rewrites
-  `max` -> `high`, so its top effort level is unreachable with no warning. Two
-  identical Sonnet rows with different effort ceilings is a trap, so the weaker
-  one is hidden.
+- `claude-opus-4-8` matches it on effort but has no `contextWindow` selector, so
+  it is capped at 200k. It was the favorite before Opus 5 shipped; now it is a
+  strictly worse duplicate of the same upstream model, which is exactly the kind
+  of near-identical second row that leads to picking the weaker one by accident.
+- `claude-opus-4-7` and `claude-opus-4-5` are plain duplicate aliases of Luna, so
+  hiding them only removes clutter.
+- `claude-opus-4-6` was previously the only 1M-context route to Luna in T3 and
+  hiding it cost that. Opus 5 defaults to 1M, so the tradeoff is gone.
+
+Because that default is 1M, the **first** message of any Opus 5 thread sends
+`claude-opus-5[1m]`, not `claude-opus-5`. Both are aliased in `config.yaml`;
+dropping the `[1m]` one breaks the row on message one with `502 unknown provider`.
+
+`claude-sonnet-4-6` is the last hidden row. It is still aliased to GPT-5.5 and
+works, but `claude-sonnet-5` supersedes it: 4.6 is the one slug where
+`normalizeClaudeCliEffort` rewrites `max` -> `high`, so its top effort level is
+unreachable with no warning. Two identical Sonnet rows with different effort
+ceilings is a trap, so the weaker one is hidden.
 
 Drop any of these from `hiddenModels` to make them pickable again.
 
@@ -308,7 +322,7 @@ The fix is the second alias block in `config.yaml`: the upstream models are also
 aliased to built-in Claude slugs, so selecting one makes T3 attach effort.
 
 - In the model picker choose the **Claude-named** entries, not the `GPT ...`
-  ones. `Claude Opus 4.8` -> Luna, `Claude Fable 5` -> Sol,
+  ones. `Claude Opus 5` -> Luna, `Claude Fable 5` -> Sol,
   `Claude Sonnet 5` -> GPT-5.5, `Claude Haiku 4.5` -> 5.4 mini.
 - **Empty `customModels`** for the claudex instance. The `GPT ...` entries are
   the only way to pick a model that ignores effort, and they look identical to
@@ -319,8 +333,9 @@ aliased to built-in Claude slugs, so selecting one makes T3 attach effort.
   `normalizeClaudeCliEffort` rewrites the selection on the way out (both the CLI
   and SDK paths, via `getEffectiveClaudeAgentEffort`): `ultrathink` sends nothing
   at all, `ultracode` -> `xhigh`, and `xhigh` -> `max` for every model except
-  `claude-fable-5`, `claude-opus-4-8` and `claude-sonnet-5`. `low`, `medium` and
-  `high` pass through unchanged, and `claude-sonnet-5` additionally passes both
+  `claude-fable-5`, `claude-opus-5`, `claude-opus-4-8` and `claude-sonnet-5`.
+  `low`, `medium` and `high` pass through unchanged, and `claude-sonnet-5`
+  additionally passes both
   `xhigh` and `max` through untouched - it is exempt from the `xhigh` -> `max`
   rewrite and from the `max` -> `high` rewrite.
 - **`max` downgrades on `claude-sonnet-4-6` only.** `max` -> `high` there, so
@@ -344,7 +359,7 @@ aliased to built-in Claude slugs, so selecting one makes T3 attach effort.
 **The model will lie about its identity under these slugs.** Claude Code's
 system prompt asserts it is Claude and the model id now agrees, so asking
 "what model are you?" returns a confident wrong answer - a thread on
-`claude-opus-4-8` is really GPT-5.6 Luna. Anything keyed on model identity
+`claude-opus-5` is really GPT-5.6 Luna. Anything keyed on model identity
 (the `claude-api` skill, model-conditional agent frontmatter) will misfire
 toward Claude behaviour. The proxy logs are the only ground truth. This is the
 unavoidable cost of getting effort through T3. The CLI keeps honest labels.

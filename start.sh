@@ -4,6 +4,7 @@
 #
 #   ./start.sh            # 15m pairing token (default)
 #   ./start.sh 5m         # custom TTL, passed to t3-pair.sh
+#   ./start.sh --detached # print pairing summary without the menu
 #
 # Order: prereqs, caffeinate, Docker, Codex token, proxy, T3 backend, tunnel, token.
 # See SETUP.md "Step 5" and QUICK-SETUP.md.
@@ -12,7 +13,29 @@ umask 077
 cd "$(dirname "$0")"
 . ./scripts/env.sh
 
-TTL="${1:-15m}"
+usage() {
+  cat <<'EOF'
+Usage: ./start.sh [-d|--detached] [TTL]
+EOF
+}
+
+TTL=15m
+DETACHED=0
+TTL_SET=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -d|--detached)
+      [ "$DETACHED" = 0 ] || { echo "duplicate detached option" >&2; usage >&2; exit 2; }
+      DETACHED=1; shift
+      ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *)
+      [ "$TTL_SET" = 0 ] || { echo "too many arguments" >&2; usage >&2; exit 2; }
+      TTL=$1; TTL_SET=1; shift
+      ;;
+  esac
+done
 
 # --- a. env ---
 codelaunch_private_file .env
@@ -47,11 +70,25 @@ if pmset -g batt | grep -q 'AC Power'; then
 else
   echo "WARNING: not on AC power - sleep assertions release when unplugged (see QUICK-SETUP.md)"
 fi
-if pgrep -f 'caffeinate -dims' >/dev/null; then
-  echo "caffeinate -dims already running (reusing)"
+caffeinate_pid=''
+if caffeinate_pid=$(codelaunch_caffeinate_owned_pid); then
+  echo "caffeinate -dims already owned by CodeLaunch (reusing PID $caffeinate_pid)"
 else
-  nohup caffeinate -dims >/dev/null 2>&1 &
-  echo "started caffeinate -dims (display/idle/system awake while on power)"
+  caffeinate_status=$?
+  [ "$caffeinate_status" -ne 2 ] || { echo "REFUSING: invalid caffeinate ownership record" >&2; exit 1; }
+  existing_caffeinate=$(codelaunch_caffeinate_exact_pids | head -1 || true)
+  if [ -n "$existing_caffeinate" ]; then
+    echo "caffeinate -dims already running (reusing without claiming PID $existing_caffeinate)"
+  else
+    nohup caffeinate -dims >/dev/null 2>&1 &
+    caffeinate_pid=$!
+    if ! kill -0 "$caffeinate_pid" 2>/dev/null || ! codelaunch_caffeinate_exact_command "$caffeinate_pid"; then
+      echo "caffeinate -dims failed verification" >&2
+      exit 1
+    fi
+    codelaunch_caffeinate_write_pid "$caffeinate_pid"
+    echo "started caffeinate -dims (display/idle/system awake while on power)"
+  fi
 fi
 
 # --- d. Docker ---
@@ -152,9 +189,6 @@ fi
 
 # --- i. one-time pairing token ---
 echo "minting pairing token ..."
-./t3-pair.sh "$TTL"
-
-# --- j. summary ---
-cat <<EOF
-
-EOF
+PAIR_ARGS=("$TTL")
+[ "$DETACHED" = 1 ] && PAIR_ARGS+=(--detached)
+./t3-pair.sh "${PAIR_ARGS[@]}"

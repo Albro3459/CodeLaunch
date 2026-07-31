@@ -616,24 +616,35 @@ The desktop `.app` is only a GUI - the backend is the same `t3` server it spawns
 runnable headless with `t3 serve`. Pairing tokens are issued by the CLI against
 the shared `~/.t3` auth store (default `T3CODE_HOME`), so they validate whichever
 single backend is listening. `./t3-pair.sh` reuses or starts that backend, verifies
-its bind matches `T3_BIND`, and prints the code, URLs, expiration, and optional
-terminal QR. `jq` is required for
-that structured output; install it with `brew install jq`. `qrencode` is
-recommended but optional (`brew install qrencode`); pairing still succeeds
-without it or if QR rendering fails. Newly started headless backends write to the
-private `$HOME/.codelaunch/run/t3-serve.log` file; an already-running process
-keeps its current log until it is restarted.
+its bind matches `T3_BIND`, and presents the code, expiration, and numbered URLs.
+The first URL is **Tunnel**. With `T3_BIND=all`, active VPN and Wi-Fi interfaces
+add direct URLs; inactive interfaces are omitted. `jq` is required for the
+structured output; install it with `brew install jq`. `qrencode` is optional
+(`brew install qrencode`). Newly started headless backends write to the private
+`$HOME/.codelaunch/run/t3-serve.log` file; an already-running process keeps its
+current log until it is restarted.
 
 ```bash
-./t3-pair.sh            # 15m token (default)
+./t3-pair.sh            # 15m token; interactive pairing helper
 ./t3-pair.sh 5m         # custom TTL
+./t3-pair.sh --detached # print code and all URLs, then exit
+./t3-pair.sh -d 5m      # TTL and detached mode may appear in either order
 ```
 
-Open the printed URL in the already-Access-authenticated browser (or paste the
-token into the pairing field). It is one-time and short-lived, so treat it like
-a password. `t3 auth pairing list|revoke` and `t3 auth session list|revoke`
-manage outstanding tokens and sessions. The headless-start path has not been
-tested while the desktop app owns the port, so test it with the app closed.
+In normal mode the helper stays open. Press `c`, enter a URL number, and it
+prints the code and renders that URL's QR; no QR is rendered before `c`. Press
+`q` to exit only the helper; services remain running. Invalid input redraws the
+menu without minting another token. `-d`/`--detached` prints the code and all
+URLs without rendering a QR or reading input. Non-TTY execution automatically
+uses detached behavior. The one-time code and URLs are passwords.
+
+The helper and QR use the full explicit `http://<address>:<port>/pair#token=...`
+URL. For manual **Add Environment**, enter only the origin shown at the front of
+that URL, such as `http://10.0.0.7:3773`, plus the printed code. Direct
+connections bypass Cloudflare Access, so use them only on a trusted network.
+`t3 auth pairing list|revoke` and `t3 auth session list|revoke` manage outstanding
+tokens and sessions. The headless-start path has not been tested while the
+desktop app owns the port, so test it with the app closed.
 
 ### 4E. Direct LAN/VPN pairing - required for the mobile app
 
@@ -646,12 +657,14 @@ T3_CHANNEL=latest
 ```
 
 `T3_BIND=all` starts the backend on `0.0.0.0`. The Cloudflare tunnel still uses
-loopback, while `t3-pair.sh` also prints direct URLs for current LAN and VPN
-addresses.
+loopback. The pairing helper adds direct URLs only for active VPN (`utun*`) and
+Wi-Fi interfaces; Ethernet, inactive interfaces, and link-local addresses are
+not presented.
 
-In the app, choose **Add Environment** and enter a printed host with the scheme,
-for example `http://10.0.0.7:3773`, plus the printed code. A bare host may be
-rewritten to `https://`.
+In the app, choose **Add Environment** and enter only the origin at the front
+of the printed full pair URL, with its explicit `http://` scheme; for example,
+enter `http://10.0.0.7:3773` plus the printed code, not `/pair#token=...`. Do not
+omit the scheme: a bare host may be rewritten to `https://`.
 
 Direct connections bypass Cloudflare Access. The pairing code is the only gate,
 so enable this only on a network you trust. `t3-pair.sh` verifies the live bind
@@ -659,16 +672,21 @@ matches `T3_BIND` and asks you to restart a backend started with the other mode.
 
 ## Step 5 - Orchestration (start.sh / stop.sh)
 
-`./start.sh [ttl]` brings the stack up in order, each step gated on a health
-check and idempotent so a live stack short-circuits to reuse:
+`./start.sh [--detached] [ttl]` brings the stack up in order, each step gated
+on a health check and idempotent so a live stack short-circuits to reuse. `-d`
+and the TTL may appear in either order. Normal mode leaves the pairing helper
+open; detached mode prints the code and all URLs, then exits. Non-TTY execution
+uses detached behavior automatically:
 
 1. **prereqs** - `.env` is parsed by `scripts/env.sh`, which accepts only the
    expected variables and never executes it as shell code. `docker`, `cloudflared`,
    `claude`, `claudex`, `npx`, and required `jq` are checked on PATH (all missing
    reported at once); `qrencode` remains optional for terminal QR rendering.
-2. **caffeinate** - warns (not fails) off AC power, and starts `caffeinate -dims`
-   if none is running. It cannot enable Wake for network access - that stays a
-   manual `pmset`/System Settings step (`pmset -g | grep womp` must read `1`).
+2. **caffeinate** - warns (not fails) off AC power. It reuses a valid
+   CodeLaunch-owned `caffeinate -dims`; otherwise it reuses an exact pre-existing
+   unowned assertion without claiming it, or starts and records its own process.
+   It cannot enable Wake for network access - that stays a manual `pmset`/System
+   Settings step (`pmset -g | grep womp` must read `1`).
 3. **Docker** - reuse if `docker info` succeeds, else run `docker desktop start`
    (native Desktop CLI, with existence probed via `docker desktop --help` since
    `status` can exit non-zero merely because Desktop is stopped) with an
@@ -682,21 +700,25 @@ check and idempotent so a live stack short-circuits to reuse:
    `curl /v1/models` with the key grepped from `config.yaml`. A rejected key
    fails loudly.
 6. **backend** - `./t3-pair.sh --ensure-only` reuses or starts the T3 backend and
-   verifies its live bind matches `T3_BIND`.
+   verifies its live bind matches `T3_BIND`. `--ensure-only` and
+   `--check-only` are noninteractive checks; they do not mint a token or open the
+   pairing helper.
 7. **tunnel** - reuse the named `$TUNNEL_NAME` process if it is already up, else
    launch it
    to `$HOME/.codelaunch/run/cloudflared-t3.log` and poll for `Registered tunnel
    connection` (up to 30s, printing `tail -20` on timeout). Reused processes keep
    their existing log destination until restarted.
-8. **pairing token** - `./t3-pair.sh [ttl]` rechecks the backend and mints the
-   one-time token only after the tunnel is ready.
+8. **pairing token** - `./t3-pair.sh [--detached] [ttl]` rechecks the backend
+   and mints the one-time token only after the tunnel is ready. `start.sh` passes
+   the TTL and detached choice through; it does not mint a second token.
 
-`./stop.sh` reverses it and leaves **Docker Desktop, the Docker daemon, native
-Claude Code, and `caffeinate -dims`** running on purpose:
+`./stop.sh` reverses the stack and leaves **Docker Desktop, the Docker daemon,
+native Claude Code, and `caffeinate -dims`** running on purpose. It prints a
+reminder to use `./stop.sh --all` for the optional full shutdown:
 
 - **tunnel** - SIGTERM the named `$TUNNEL_NAME` process, wait up to 35s for its
-  grace period, then signal it again if needed. Other cloudflared connectors are
-  left alone.
+  grace period, then signal it again if needed. Other `cloudflared` connectors,
+  including T3 Connect relays, are left alone.
 - **T3 backend** - the PID listening on `$T3_PORT`. If its command path contains
   a desktop app bundle, its app name is passed to AppleScript as an argument for
   a graceful quit; otherwise the headless `t3 serve` gets SIGTERM then SIGKILL
@@ -706,7 +728,14 @@ Claude Code, and `caffeinate -dims`** running on purpose:
   lacks that marker, so it is never touched. SIGTERM only.
 - **cliproxy** - `./cliproxy/stop.sh` (`docker compose down`), skipped with a
   note if docker is unreachable.
-- **caffeinate** - intentionally left running so a remote stop does not release
-  the sleep assertion before SSH can start the stack again. `start.sh` reuses it.
+- **caffeinate** - normal stop leaves it running so a remote stop does not release
+  the sleep assertion before SSH can start the stack again. A pre-existing exact
+  `caffeinate -dims` is reused without being claimed and is never stopped.
+
+`./stop.sh --all` performs the normal teardown, then stops Docker Desktop and,
+last, only the exact `caffeinate -dims` process recorded as CodeLaunch-owned. It
+rechecks ownership before signaling and leaves invalid or changed records alone.
+It never stops native Claude Code, T3 Connect or unrelated tunnels, unrelated
+Docker containers, or unowned `caffeinate` processes.
 
 Every kill is guarded with `|| true` so re-runs are clean no-ops.

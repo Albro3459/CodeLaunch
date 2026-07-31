@@ -6,6 +6,26 @@ umask 077
 cd "$(dirname "$0")"
 . ./scripts/env.sh
 
+usage() {
+  cat <<'EOF'
+Usage: ./stop.sh [-a|--all]
+       ./stop.sh -h|--help
+EOF
+}
+
+ALL=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -a|--all)
+      [ "$ALL" = 0 ] || { echo "duplicate --all option" >&2; usage >&2; exit 2; }
+      ALL=1; shift
+      ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *) echo "unexpected argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
 # --- a. env (defaults if .env is gone) ---
 codelaunch_private_file .env
 codelaunch_load_env --optional T3_PORT TUNNEL_NAME
@@ -96,5 +116,55 @@ else
   echo "docker not reachable - skipping proxy stop"
 fi
 
-# --- f. left running on purpose ---
-echo "left running: Docker Desktop + daemon, native Claude Code sessions, caffeinate, T3 Connect relays"
+if [ "$ALL" = 1 ]; then
+  # --- f. Docker Desktop (guarded, nonfatal) ---
+  if command -v docker >/dev/null 2>&1 && docker desktop --help >/dev/null 2>&1; then
+    echo "stopping Docker Desktop ..."
+    docker desktop stop || echo "WARNING: Docker Desktop stop failed; leaving it running"
+  else
+    echo "WARNING: Docker Desktop CLI unavailable; leaving it running"
+  fi
+
+  # --- g. CodeLaunch-owned caffeinate only ---
+  caffeinate_pid=''
+  if caffeinate_pid=$(codelaunch_caffeinate_owned_pid); then
+    if codelaunch_caffeinate_record_pid &&
+      [ "$CODELAUNCH_CAFFEINATE_PID" = "$caffeinate_pid" ] &&
+      kill -0 "$caffeinate_pid" 2>/dev/null &&
+      codelaunch_caffeinate_exact_command "$caffeinate_pid" &&
+      [ "$(codelaunch_caffeinate_start_identity "$caffeinate_pid")" = "$CODELAUNCH_CAFFEINATE_START_IDENTITY" ]; then
+      kill "$caffeinate_pid" 2>/dev/null || true
+      for _ in $(seq 1 10); do
+        kill -0 "$caffeinate_pid" 2>/dev/null || break
+        sleep 1
+      done
+      if kill -0 "$caffeinate_pid" 2>/dev/null &&
+        codelaunch_caffeinate_record_pid &&
+        [ "$CODELAUNCH_CAFFEINATE_PID" = "$caffeinate_pid" ] &&
+        codelaunch_caffeinate_exact_command "$caffeinate_pid" &&
+        [ "$(codelaunch_caffeinate_start_identity "$caffeinate_pid")" = "$CODELAUNCH_CAFFEINATE_START_IDENTITY" ]; then
+        kill -9 "$caffeinate_pid" 2>/dev/null || true
+      fi
+      if ! kill -0 "$caffeinate_pid" 2>/dev/null; then
+        codelaunch_caffeinate_clear_record
+        echo "CodeLaunch-owned caffeinate stopped"
+      else
+        echo "WARNING: CodeLaunch-owned caffeinate is still running"
+      fi
+    else
+      echo "WARNING: caffeinate ownership changed; refusing to signal PID $caffeinate_pid"
+    fi
+  else
+    caffeinate_status=$?
+    if [ "$caffeinate_status" -eq 1 ]; then
+      echo "no CodeLaunch-owned caffeinate running"
+    else
+      echo "WARNING: invalid caffeinate ownership record; leaving caffeinate running"
+    fi
+  fi
+  echo "native Claude Code sessions and T3 Connect relays remain running"
+else
+  # --- f. left running on purpose ---
+  echo "left running: Docker Desktop + daemon, native Claude Code sessions, caffeinate, T3 Connect relays"
+  echo "Use ./stop.sh --all to also stop Docker Desktop and CodeLaunch-owned caffeinate."
+fi

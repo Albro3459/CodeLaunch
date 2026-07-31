@@ -11,13 +11,43 @@ set -euo pipefail
 umask 077
 cd "$(dirname "$0")"
 . ./scripts/env.sh
+. ./scripts/pairing.sh
+
+usage() {
+  cat <<'EOF'
+Usage: ./t3-pair.sh [-d|--detached] [TTL]
+       ./t3-pair.sh --check-only
+       ./t3-pair.sh --ensure-only
+EOF
+}
 
 MODE=pair
-case "${1:-}" in
-  --check-only) MODE=check; shift ;;
-  --ensure-only) MODE=ensure; shift ;;
-esac
-TTL="${1:-15m}"
+DETACHED=0
+TTL=15m
+TTL_SET=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -d|--detached)
+      [ "$MODE" = pair ] && [ "$DETACHED" = 0 ] || { echo "invalid option combination" >&2; usage >&2; exit 2; }
+      DETACHED=1; shift
+      ;;
+    --check-only|--ensure-only)
+      [ "$MODE" = pair ] && [ "$TTL_SET" = 0 ] && [ "$DETACHED" = 0 ] || { echo "invalid option combination" >&2; usage >&2; exit 2; }
+      case "$1" in
+        --check-only) MODE=check ;;
+        --ensure-only) MODE=ensure ;;
+      esac
+      shift
+      [ "$#" -eq 0 ] || { echo "special mode accepts no other arguments" >&2; usage >&2; exit 2; }
+      ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *)
+      [ "$MODE" = pair ] && [ "$TTL_SET" = 0 ] || { echo "unexpected argument: $1" >&2; usage >&2; exit 2; }
+      TTL=$1; TTL_SET=1; shift
+      ;;
+  esac
+done
 
 codelaunch_private_file .env
 codelaunch_load_env T3_HOSTNAME T3_PORT T3_BIND T3_CHANNEL T3_CHANNEL_SKIP_CHECK
@@ -178,50 +208,4 @@ credential=$(printf '%s' "$pairing_json" | jq -r '.credential')
 pair_url=$(printf '%s' "$pairing_json" | jq -r '.pairUrl')
 expires_at=$(printf '%s' "$pairing_json" | jq -r '.expiresAt')
 
-cat <<EOF
-
-============================================================
-T3 PAIRING
-============================================================
-CODE:       $credential
-EXPIRES:    $expires_at
-
-PAIR URLS
-  $pair_url
-      Browser via Cloudflare Access.
-EOF
-
-if [ "$T3_BIND" = all ]; then
-  direct_addrs=$(codelaunch_local_ipv4)
-  if [ -n "$direct_addrs" ]; then
-    echo
-    for ip in $direct_addrs; do
-      echo "  http://$ip:$T3_PORT/pair#token=$credential"
-    done
-    echo "      Mobile app via LAN/VPN. Enter a host such as"
-    echo "      http://${direct_addrs%%$'\n'*}:$T3_PORT plus the CODE above."
-  else
-    echo
-    echo "  (no LAN or VPN address found - is the network up?)"
-  fi
-fi
-
-cat <<EOF
-
-If the QR code does not scan, open the full Pair URL above.
-QR CODE:
-
-EOF
-if command -v qrencode >/dev/null 2>&1; then
-  if ! printf '%s' "$pair_url" | qrencode -t ANSIUTF8 -o -; then
-    echo "(QR rendering failed; use the complete Pair URL above.)"
-  fi
-else
-  echo "(qrencode not installed; use the complete Pair URL above.)"
-fi
-cat <<'EOF'
-
-============================================================
-WARNING: This is a one-time secret. Treat the code and URL like a password.
-============================================================
-EOF
+codelaunch_pairing_present "$credential" "$expires_at" "$pair_url" "$T3_PORT" "$T3_BIND" "$DETACHED"

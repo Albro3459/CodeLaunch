@@ -17,13 +17,23 @@ without `caffeinate`, it stops.
 ## Start
 
 ```bash
-./start.sh            # 15m pairing token
+./start.sh            # 15m pairing token; interactive pairing helper
 ./start.sh 5m         # custom TTL
+./start.sh --detached # print code and all pair URLs, then exit
+./start.sh 5m -d      # TTL and detached mode may appear in either order
 ```
 
-Either open the Pair URL, navigate to your URL directly and paste the token, or scan the QR code with a phone camera.
+Normal `start.sh` and `t3-pair.sh` stay open in the pairing helper. They print a
+numbered list beginning with the Tunnel URL; with `T3_BIND=all`, active VPN and
+Wi-Fi addresses are included when available. Press `c`, enter a URL number, and
+scan the selected QR. No QR is rendered before `c`. Press `q` to exit only the
+pairing helper; services keep running. `-d`/`--detached` prints the code and all
+URLs, then exits without reading input. Non-TTY runs automatically use detached
+behavior. `qrencode` is optional.
 
-For mobile app pairing over a trusted LAN or VPN, set `T3_BIND=all`. See
+For mobile app pairing over a trusted LAN or VPN, set `T3_BIND=all`. Direct
+URLs use an explicit `http://` scheme and bypass Cloudflare Access, so use them
+only on a trusted active VPN or Wi-Fi network. See
 [SETUP.md](SETUP.md#4e-direct-lanvpn-pairing-required-for-the-mobile-app).
 
 If the Codex sign-in has expired, `start.sh` opens the browser login first; otherwise it reuses the running services. It ensures the T3 backend matches `T3_BIND`, starts the tunnel, then mints the pairing token.
@@ -32,12 +42,16 @@ If the Codex sign-in has expired, `start.sh` opens the browser login first; othe
 
 ```bash
 ./stop.sh             # tunnel, T3 backend, claudex sessions, proxy
+./stop.sh --all       # also Docker Desktop and CodeLaunch-owned caffeinate
+./stop.sh -a          # short form
 ```
 
-Leaves Docker Desktop, native Claude Code, `caffeinate -dims`, and unrelated
-T3 Connect relay connectors running. Keeping
-the sleep assertion avoids losing SSH access between a remote stop and restart;
-`start.sh` reuses it instead of starting a duplicate.
+Normal stop leaves Docker Desktop, native Claude Code, `caffeinate -dims`, and
+unrelated T3 Connect relay connectors running. `start.sh` reuses an existing
+caffeinate assertion; a pre-existing unowned assertion is reused but never
+stopped. `--all` stops Docker Desktop and only the CodeLaunch-owned caffeinate,
+after the proxy; it never stops native Claude Code, T3 Connect, unrelated
+tunnels, or unrelated Docker containers.
 
 ## Useful
 

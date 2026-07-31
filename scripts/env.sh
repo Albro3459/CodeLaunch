@@ -160,10 +160,41 @@ codelaunch_reset_private_log() {
 
 # Current non-loopback, non-link-local IPv4 addresses.
 codelaunch_local_ipv4() {
-  ifconfig 2>/dev/null \
+  /sbin/ifconfig 2>/dev/null \
     | awk '$1 == "inet" && $2 != "127.0.0.1" { print $2 }' \
     | grep -vE '^169\.254\.' \
     | sort -u
+}
+
+# Emits `label|address` rows for active VPN interfaces, in stable order.
+codelaunch_vpn_ipv4() {
+  local iface address
+  /sbin/ifconfig -l 2>/dev/null | tr ' ' '\n' | awk '/^utun[0-9]+$/ { print }' | sort | while IFS= read -r iface; do
+    [ -n "$iface" ] || continue
+    /sbin/ifconfig "$iface" 2>/dev/null \
+      | awk '$1 == "inet" { print $2 }' \
+      | while IFS= read -r address; do
+          case "$address" in
+            ''|127.*|169.254.*) continue ;;
+            *.*.*.*) printf 'VPN|%s\n' "$address" ;;
+          esac
+        done
+  done | sort -t '|' -k2,2 -k1,1 -u
+}
+
+# Emits one `label|address` row for the active Wi-Fi interface.
+codelaunch_wifi_ipv4() {
+  local port address
+  [ -x /usr/sbin/networksetup ] || return 0
+  [ -x /usr/sbin/ipconfig ] || return 0
+  port=$(/usr/sbin/networksetup -listallhardwareports 2>/dev/null \
+    | awk '/^Hardware Port: (Wi-Fi|AirPort)$/ { wanted=1; next } /^Hardware Port:/ { wanted=0 } wanted && /^Device:/ { print $2; exit }')
+  [ -n "$port" ] || return 0
+  address=$(/usr/sbin/ipconfig getifaddr "$port" 2>/dev/null || true)
+  case "$address" in
+    ''|127.*|169.254.*) return 0 ;;
+    *.*.*.*) printf 'Wi-Fi|%s\n' "$address" ;;
+  esac
 }
 
 # Match only the named tunnel, not unrelated cloudflared connectors.
@@ -184,4 +215,88 @@ codelaunch_prepare_runtime() {
   mkdir -p "$root" "$CODELAUNCH_RUNTIME_DIR"
   chmod 700 "$root" "$CODELAUNCH_RUNTIME_DIR"
   export CODELAUNCH_RUNTIME_DIR
+}
+
+codelaunch_caffeinate_pid_file() {
+  local root="$HOME/.codelaunch"
+  [ ! -L "$root" ] || return 2
+  [ ! -L "$root/run" ] || return 2
+  printf '%s/caffeinate.pid\n' "$root/run"
+}
+
+codelaunch_caffeinate_record_pid() {
+  local file record pid identity
+  file=$(codelaunch_caffeinate_pid_file) || return 2
+  [ -e "$file" ] || return 1
+  [ ! -L "$file" ] || return 2
+  [ -f "$file" ] || return 2
+  [ -s "$file" ] || return 1
+  record=$(awk 'NR == 1 { pid = $0; next } NR == 2 { identity = $0; next } { bad = 1 } END { if (bad || pid !~ /^[0-9]+$/ || pid == 0 || identity == "") exit 1; print pid; print identity }' "$file") || return 2
+  pid=${record%%$'\n'*}
+  identity=${record#*$'\n'}
+  printf -v CODELAUNCH_CAFFEINATE_PID '%s' "$pid"
+  printf -v CODELAUNCH_CAFFEINATE_START_IDENTITY '%s' "$identity"
+  return 0
+}
+
+codelaunch_caffeinate_clear_record() {
+  local file
+  file=$(codelaunch_caffeinate_pid_file) || return 2
+  [ ! -L "$file" ] || { echo "REFUSING: caffeinate PID path is a symlink: $file" >&2; return 1; }
+  [ ! -e "$file" ] || : > "$file"
+  [ ! -e "$file" ] || chmod 600 "$file"
+}
+
+codelaunch_caffeinate_start_identity() {
+  local pid=$1 identity
+  identity=$(ps -p "$pid" -o lstart= 2>/dev/null | awk '{$1=$1; print}') || return 1
+  [ -n "$identity" ] || return 1
+  printf '%s\n' "$identity"
+}
+
+codelaunch_caffeinate_exact_command() {
+  local pid=$1 args
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  args=$(ps -ww -p "$pid" -o args= 2>/dev/null) || return 1
+  codelaunch_trim "$args"
+  args=$CODELAUNCH_VALUE
+  case "$args" in
+    'caffeinate -dims'|/*/caffeinate\ -dims) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+codelaunch_caffeinate_owned_pid() {
+  local pid rc
+  codelaunch_caffeinate_record_pid
+  rc=$?
+  case "$rc" in
+    1) return 1 ;;
+    2) return 2 ;;
+  esac
+  pid=$CODELAUNCH_CAFFEINATE_PID
+  if kill -0 "$pid" 2>/dev/null &&
+    codelaunch_caffeinate_exact_command "$pid" &&
+    [ "$(codelaunch_caffeinate_start_identity "$pid")" = "$CODELAUNCH_CAFFEINATE_START_IDENTITY" ]; then
+    printf '%s\n' "$pid"
+    return 0
+  fi
+  codelaunch_caffeinate_clear_record || return 2
+  return 1
+}
+
+codelaunch_caffeinate_exact_pids() {
+  local pid
+  for pid in $(pgrep -x caffeinate 2>/dev/null || true); do
+    codelaunch_caffeinate_exact_command "$pid" && printf '%s\n' "$pid"
+  done
+}
+
+codelaunch_caffeinate_write_pid() {
+  local pid=$1 file identity
+  file=$(codelaunch_caffeinate_pid_file) || return 2
+  [ ! -L "$file" ] || { echo "REFUSING: caffeinate PID path is a symlink: $file" >&2; return 1; }
+  identity=$(codelaunch_caffeinate_start_identity "$pid") || return 1
+  printf '%s\n%s\n' "$pid" "$identity" > "$file"
+  chmod 600 "$file"
 }

@@ -13,16 +13,22 @@ codelaunch_load_env --optional T3_PORT TUNNEL_NAME
 : "${TUNNEL_NAME:=t3-code}"
 
 # --- b. tunnel (SIGTERM, honor 30s grace, force with a second signal) ---
-if pgrep -f "cloudflared tunnel run" >/dev/null; then
-  echo "stopping tunnel ..."
-  pkill -f "cloudflared tunnel run" || true
+tunnel_pids=$(codelaunch_tunnel_pids "$TUNNEL_NAME")
+if [ -n "$tunnel_pids" ]; then
+  echo "stopping tunnel $TUNNEL_NAME ..."
+  for p in $tunnel_pids; do kill "$p" 2>/dev/null || true; done
   for _ in $(seq 1 35); do
-    pgrep -f "cloudflared tunnel run" >/dev/null || break
+    tunnel_alive=0
+    for p in $tunnel_pids; do
+      if kill -0 "$p" 2>/dev/null; then tunnel_alive=1; break; fi
+    done
+    [ "$tunnel_alive" = 0 ] && break
     sleep 1
   done
-  if pgrep -f "cloudflared tunnel run" >/dev/null; then
+  tunnel_pids=$(codelaunch_tunnel_pids "$TUNNEL_NAME")
+  if [ -n "$tunnel_pids" ]; then
     echo "tunnel still up after grace - sending second signal"
-    pkill -f "cloudflared tunnel run" || true
+    for p in $tunnel_pids; do kill "$p" 2>/dev/null || true; done
   fi
   echo "tunnel stopped"
 else
@@ -91,4 +97,4 @@ else
 fi
 
 # --- f. left running on purpose ---
-echo "left running: Docker Desktop + daemon, native Claude Code sessions, caffeinate"
+echo "left running: Docker Desktop + daemon, native Claude Code sessions, caffeinate, T3 Connect relays"

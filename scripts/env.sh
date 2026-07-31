@@ -11,7 +11,7 @@ codelaunch_trim() {
 
 codelaunch_allowed_env() {
   case "$1" in
-    T3_HOSTNAME|T3_PORT|T3_CHANNEL|T3_CHANNEL_SKIP_CHECK|TUNNEL_NAME|ACCESS_EMAIL|CLOUDFLARE_TEAM) return 0 ;;
+    T3_HOSTNAME|T3_PORT|T3_BIND|T3_CHANNEL|T3_CHANNEL_SKIP_CHECK|TUNNEL_NAME|ACCESS_EMAIL|CLOUDFLARE_TEAM) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -156,6 +156,24 @@ codelaunch_reset_private_log() {
   [ ! -L "$1" ] || { echo "REFUSING: log path is a symlink: $1" >&2; return 1; }
   : > "$1"
   chmod 600 "$1"
+}
+
+# Current non-loopback, non-link-local IPv4 addresses.
+codelaunch_local_ipv4() {
+  ifconfig 2>/dev/null \
+    | awk '$1 == "inet" && $2 != "127.0.0.1" { print $2 }' \
+    | grep -vE '^169\.254\.' \
+    | sort -u
+}
+
+# Match only the named tunnel, not unrelated cloudflared connectors.
+codelaunch_tunnel_pids() {
+  local name=$1 pid args
+  [ -n "$name" ] || return 0
+  for pid in $(pgrep -f 'cloudflared tunnel run' 2>/dev/null); do
+    args=$(ps -ww -p "$pid" -o args= 2>/dev/null) || continue
+    case " $args " in *" $name "*) echo "$pid" ;; esac
+  done
 }
 
 codelaunch_prepare_runtime() {

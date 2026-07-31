@@ -16,8 +16,12 @@ TTL="${1:-15m}"
 
 # --- a. env ---
 codelaunch_private_file .env
-codelaunch_load_env T3_HOSTNAME T3_PORT T3_CHANNEL T3_CHANNEL_SKIP_CHECK TUNNEL_NAME
+codelaunch_load_env T3_HOSTNAME T3_PORT T3_BIND T3_CHANNEL T3_CHANNEL_SKIP_CHECK TUNNEL_NAME
 codelaunch_require_env T3_HOSTNAME T3_PORT TUNNEL_NAME
+: "${T3_BIND:=loopback}"
+if [ "$T3_BIND" = all ]; then
+  echo "WARNING: T3_BIND=all exposes :$T3_PORT to your LAN/VPN; pairing code only"
+fi
 codelaunch_private_file cliproxy/config.yaml
 codelaunch_private_tree cliproxy/auth
 codelaunch_prepare_runtime
@@ -128,8 +132,8 @@ echo "ensuring T3 backend ..."
 ./t3-pair.sh --ensure-only
 
 # --- h. tunnel ---
-if pgrep -f "cloudflared tunnel run" >/dev/null; then
-  echo "tunnel already running (reusing)"
+if [ -n "$(codelaunch_tunnel_pids "$TUNNEL_NAME")" ]; then
+  echo "tunnel $TUNNEL_NAME already running (reusing)"
 else
   echo "starting tunnel $TUNNEL_NAME ..."
   codelaunch_reset_private_log "$CLOUDFLARED_LOG"

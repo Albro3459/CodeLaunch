@@ -23,7 +23,10 @@ without `caffeinate`, it stops.
 
 Either open the Pair URL, navigate to your URL directly and paste the token, or scan the QR code with a phone camera.
 
-If the Codex sign-in has expired, `start.sh` opens the browser login first, otherwise it reuses the running services. It ensures the loopback T3 backend before starting the Cloudflare tunnel, then mints the pairing token after the tunnel is ready.
+For mobile app pairing over a trusted LAN or VPN, set `T3_BIND=all`. See
+[SETUP.md](SETUP.md#4e-direct-lanvpn-pairing-required-for-the-mobile-app).
+
+If the Codex sign-in has expired, `start.sh` opens the browser login first; otherwise it reuses the running services. It ensures the T3 backend matches `T3_BIND`, starts the tunnel, then mints the pairing token.
 
 ## Stop
 
@@ -31,7 +34,8 @@ If the Codex sign-in has expired, `start.sh` opens the browser login first, othe
 ./stop.sh             # tunnel, T3 backend, claudex sessions, proxy
 ```
 
-Leaves Docker Desktop, native Claude Code, and `caffeinate -dims` running. Keeping
+Leaves Docker Desktop, native Claude Code, `caffeinate -dims`, and unrelated
+T3 Connect relay connectors running. Keeping
 the sleep assertion avoids losing SSH access between a remote stop and restart;
 `start.sh` reuses it instead of starting a duplicate.
 

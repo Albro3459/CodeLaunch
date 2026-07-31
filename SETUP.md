@@ -593,7 +593,10 @@ Verify in this order, from a private window:
 - After Access passes, a browser with no T3 device session still cannot use the
   backend. This is the layer that matters if Access is ever misconfigured.
 - A live agent response streams end to end (WebSocket through the tunnel).
-- `lsof -nP -iTCP -sTCP:LISTEN` shows T3 on loopback only, never `0.0.0.0`.
+- `lsof -nP -iTCP -sTCP:LISTEN` shows T3 on loopback only. With the default
+  `T3_BIND=loopback` a `0.0.0.0` listener means something is wrong; under
+  `T3_BIND=all` the wildcard bind is expected and `t3-pair.sh` asserts it (see
+  4E).
 
 Revoke the test session afterward with `t3 auth session`.
 
@@ -603,17 +606,18 @@ Passing Cloudflare Access is not enough: T3 requires its own one-time pairing
 credential before a browser can drive the backend, so a remote browser lands on
 "Pair with this environment". This is a second, independent layer - even a
 misconfigured Access policy leaves the backend unusable without a T3 session.
-Leave Desktop's **Network access** on "Limited to this machine." Turning it on
-binds `0.0.0.0`, which the tunnel never needs (it connects over loopback) and
-which Step 3 forbids.
+Leave Desktop's **Network access** on "Limited to this machine." The tunnel never
+needs it (it connects over loopback), and CodeLaunch cannot guard that toggle -
+it belongs to the app, not to the backend the scripts manage. When you do want
+LAN or VPN reach, use `T3_BIND=all` (4E) instead: it applies to the headless
+backend, and `t3-pair.sh` verifies the resulting bind on every run.
 
 The desktop `.app` is only a GUI - the backend is the same `t3` server it spawns,
-runnable headless with `t3 serve --host 127.0.0.1`. Pairing tokens are issued by
-the CLI against the shared `~/.t3` auth store (default `T3CODE_HOME`), so they
-validate whichever single backend is listening. `./t3-pair.sh` wraps this: it
-reuses an existing backend or starts a headless one, refuses to proceed unless
-all listeners are on loopback, and prints a structured pairing block with the code,
-complete URL, expiration, and an optional terminal QR. `jq` is required for
+runnable headless with `t3 serve`. Pairing tokens are issued by the CLI against
+the shared `~/.t3` auth store (default `T3CODE_HOME`), so they validate whichever
+single backend is listening. `./t3-pair.sh` reuses or starts that backend, verifies
+its bind matches `T3_BIND`, and prints the code, URLs, expiration, and optional
+terminal QR. `jq` is required for
 that structured output; install it with `brew install jq`. `qrencode` is
 recommended but optional (`brew install qrencode`); pairing still succeeds
 without it or if QR rendering fails. Newly started headless backends write to the
@@ -630,6 +634,28 @@ token into the pairing field). It is one-time and short-lived, so treat it like
 a password. `t3 auth pairing list|revoke` and `t3 auth session list|revoke`
 manage outstanding tokens and sessions. The headless-start path has not been
 tested while the desktop app owns the port, so test it with the app closed.
+
+### 4E. Direct LAN/VPN pairing - required for the mobile app
+
+The mobile app cannot complete Cloudflare Access, so it must connect directly
+over a trusted LAN or VPN. In `.env`:
+
+```bash
+T3_BIND=all
+T3_CHANNEL=latest
+```
+
+`T3_BIND=all` starts the backend on `0.0.0.0`. The Cloudflare tunnel still uses
+loopback, while `t3-pair.sh` also prints direct URLs for current LAN and VPN
+addresses.
+
+In the app, choose **Add Environment** and enter a printed host with the scheme,
+for example `http://10.0.0.7:3773`, plus the printed code. A bare host may be
+rewritten to `https://`.
+
+Direct connections bypass Cloudflare Access. The pairing code is the only gate,
+so enable this only on a network you trust. `t3-pair.sh` verifies the live bind
+matches `T3_BIND` and asks you to restart a backend started with the other mode.
 
 ## Step 5 - Orchestration (start.sh / stop.sh)
 
@@ -655,10 +681,10 @@ check and idempotent so a live stack short-circuits to reuse:
 5. **cliproxy** - `./cliproxy/start.sh`, then an authenticated
    `curl /v1/models` with the key grepped from `config.yaml`. A rejected key
    fails loudly.
-6. **backend** - `./t3-pair.sh --ensure-only` reuses or starts the loopback T3
-   backend, verifies that a live process owns the port, and refuses non-loopback
-   listeners before the public tunnel starts.
-7. **tunnel** - reuse if `cloudflared tunnel run` is already up, else launch it
+6. **backend** - `./t3-pair.sh --ensure-only` reuses or starts the T3 backend and
+   verifies its live bind matches `T3_BIND`.
+7. **tunnel** - reuse the named `$TUNNEL_NAME` process if it is already up, else
+   launch it
    to `$HOME/.codelaunch/run/cloudflared-t3.log` and poll for `Registered tunnel
    connection` (up to 30s, printing `tail -20` on timeout). Reused processes keep
    their existing log destination until restarted.
@@ -668,8 +694,9 @@ check and idempotent so a live stack short-circuits to reuse:
 `./stop.sh` reverses it and leaves **Docker Desktop, the Docker daemon, native
 Claude Code, and `caffeinate -dims`** running on purpose:
 
-- **tunnel** - SIGTERM via `pkill`, wait up to 35s for the 30s cloudflared grace,
-  then a second signal forces immediate exit.
+- **tunnel** - SIGTERM the named `$TUNNEL_NAME` process, wait up to 35s for its
+  grace period, then signal it again if needed. Other cloudflared connectors are
+  left alone.
 - **T3 backend** - the PID listening on `$T3_PORT`. If its command path contains
   a desktop app bundle, its app name is passed to AppleScript as an argument for
   a graceful quit; otherwise the headless `t3 serve` gets SIGTERM then SIGKILL

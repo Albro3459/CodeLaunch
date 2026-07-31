@@ -4,6 +4,8 @@ Remote Control Agent Setup (Codex in Claude Code w/ [CLIProxyAPI](https://github
 
 Tested on an ARM Mac (macOS 26.x), working end to end from off-network devices, phone included. Exact versions in [TOOL-VERSIONS.md](TOOL-VERSIONS.md). Day-to-day start/stop in [QUICK-SETUP.md](QUICK-SETUP.md). Full build docs in [SETUP.md](SETUP.md).
 
+Browsers connect through Cloudflare Access. The mobile app pairs over a trusted LAN or VPN with `T3_BIND=all`; see [SETUP.md](SETUP.md#4e-direct-lanvpn-pairing-required-for-the-mobile-app).
+
 ## Screenshots + Remote Control Demo
 
 #### Claude and Codex Subscriptions

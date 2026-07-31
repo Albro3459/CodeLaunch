@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Makes sure a T3 backend is running on loopback, then mints a one-time pairing token for the browser.
+# Ensures the T3 backend matches T3_BIND, then mints a one-time pairing token.
 #
 #   ./t3-pair.sh            # 15m token (default)
 #   ./t3-pair.sh 5m         # custom TTL (any t3 --ttl form: 5m, 1h, 30d)
 #   ./t3-pair.sh --check-only    # verify T3_CHANNEL vs the desktop app, then exit
-#   ./t3-pair.sh --ensure-only   # ensure the loopback backend, then exit
+#   ./t3-pair.sh --ensure-only   # ensure the backend, then exit
 #
 # T3_CHANNEL must match the installed desktop app's channel, since both share the ~/.t3 store and a mismatch can break it. Escape hatch: T3_CHANNEL_SKIP_CHECK=1.
 set -euo pipefail
@@ -20,7 +20,7 @@ esac
 TTL="${1:-15m}"
 
 codelaunch_private_file .env
-codelaunch_load_env T3_HOSTNAME T3_PORT T3_CHANNEL T3_CHANNEL_SKIP_CHECK
+codelaunch_load_env T3_HOSTNAME T3_PORT T3_BIND T3_CHANNEL T3_CHANNEL_SKIP_CHECK
 codelaunch_require_env T3_PORT
 if [ "$MODE" = pair ]; then codelaunch_require_env T3_HOSTNAME; fi
 
@@ -30,6 +30,13 @@ case "$T3_CHANNEL" in
   *) echo "T3_CHANNEL must be 'nightly' or 'latest', got '$T3_CHANNEL'"; exit 1 ;;
 esac
 PKG="t3@$T3_CHANNEL"
+
+: "${T3_BIND:=loopback}"
+case "$T3_BIND" in
+  loopback) BIND_HOST=127.0.0.1 ;;
+  all)      BIND_HOST=0.0.0.0 ;;
+  *) echo "T3_BIND must be 'loopback' or 'all', got '$T3_BIND'"; exit 1 ;;
+esac
 
 listening() { lsof -nP -iTCP:"$T3_PORT" -sTCP:LISTEN 2>/dev/null; }
 
@@ -108,9 +115,9 @@ fi
 if listening >/dev/null; then
   echo "T3 backend already listening on :$T3_PORT (reusing)"
 else
-  echo "starting headless T3 backend ($PKG) on 127.0.0.1:$T3_PORT ..."
+  echo "starting headless T3 backend ($PKG) on $BIND_HOST:$T3_PORT ..."
   codelaunch_reset_private_log "$T3_SERVE_LOG"
-  nohup npx --yes "$PKG" serve --host 127.0.0.1 --port "$T3_PORT" >"$T3_SERVE_LOG" 2>&1 &
+  nohup npx --yes "$PKG" serve --host "$BIND_HOST" --port "$T3_PORT" >"$T3_SERVE_LOG" 2>&1 &
   for _ in $(seq 1 30); do
     listening >/dev/null && break
     sleep 1
@@ -119,19 +126,30 @@ else
   echo "backend up"
 fi
 
-# The tunnel only needs a live loopback listener. Keep the check simple and fail closed if it disappears.
-listener_pid=$(lsof -nP -iTCP:"$T3_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)
+listener_rows=$(listening || true)
+listener_pid=$(printf '%s\n' "$listener_rows" | awk 'NR == 2 { print $2 }')
+listener_lines=$(printf '%s\n' "$listener_rows" | tail -n +2)
 if [ -z "$listener_pid" ] || ! ps -p "$listener_pid" -o command= >/dev/null 2>&1; then
   echo "REFUSING: no live backend process owns :$T3_PORT."
   exit 1
 fi
-non_loopback=$(listening | tail -n +2 | grep -vE '(^|[[:space:]])(127\.0\.0\.1|\[::1\]|::1):' || true)
-if [ -n "$non_loopback" ]; then
-  echo "REFUSING: backend is not bound exclusively to loopback. Fix before pairing."
-  echo "$non_loopback"
-  exit 1
+if [ "$T3_BIND" = loopback ]; then
+  non_loopback=$(printf '%s\n' "$listener_lines" | grep -vE '(^|[[:space:]])(127\.0\.0\.1|\[::1\]|::1):' || true)
+  if [ -n "$non_loopback" ]; then
+    echo "REFUSING: T3_BIND=loopback but the backend is bound wider. Fix before pairing."
+    echo "$non_loopback"
+    exit 1
+  fi
+  echo "backend check ok (PID $listener_pid, loopback only)"
+else
+  if ! printf '%s\n' "$listener_lines" | grep -qE '(^|[[:space:]])(\*|0\.0\.0\.0):'"$T3_PORT"'([[:space:]]|$)'; then
+    echo "REFUSING: T3_BIND=all but nothing is listening on the wildcard address."
+    echo "  Restart the backend with ./stop.sh && ./start.sh"
+    printf '%s\n' "$listener_lines"
+    exit 1
+  fi
+  echo "backend check ok (PID $listener_pid, wildcard bind)"
 fi
-echo "backend check ok (PID $listener_pid, loopback only)"
 
 if [ "$MODE" = ensure ]; then exit 0; fi
 
@@ -166,8 +184,29 @@ cat <<EOF
 T3 PAIRING
 ============================================================
 CODE:       $credential
-PAIR URL:   $pair_url
 EXPIRES:    $expires_at
+
+PAIR URLS
+  $pair_url
+      Browser via Cloudflare Access.
+EOF
+
+if [ "$T3_BIND" = all ]; then
+  direct_addrs=$(codelaunch_local_ipv4)
+  if [ -n "$direct_addrs" ]; then
+    echo
+    for ip in $direct_addrs; do
+      echo "  http://$ip:$T3_PORT/pair#token=$credential"
+    done
+    echo "      Mobile app via LAN/VPN. Enter a host such as"
+    echo "      http://${direct_addrs%%$'\n'*}:$T3_PORT plus the CODE above."
+  else
+    echo
+    echo "  (no LAN or VPN address found - is the network up?)"
+  fi
+fi
+
+cat <<EOF
 
 If the QR code does not scan, open the full Pair URL above.
 QR CODE:

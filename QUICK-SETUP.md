@@ -38,6 +38,28 @@ only on a trusted active VPN or Wi-Fi network. See
 
 If the Codex sign-in has expired, `start.sh` opens the browser login first; otherwise it reuses the running services. It ensures the T3 backend matches `T3_BIND`, starts the tunnel, then mints the pairing token.
 
+## Push notifications (optional)
+
+Off by default. Enabling sends thread and project titles to `relay.t3.codes`, which
+forwards to APNs - the one part of this stack that leaves infrastructure you control.
+It does not use your tunnel, and no code or diffs are sent. See
+[SETUP.md](SETUP.md#4f-publishing-agent-activity-push-notifications).
+
+```bash
+./t3-publish.sh              # one-time setup, headless OAuth (sign in from any device)
+./t3-publish.sh --disable    # stop publishing, keep the sign-in
+./t3-publish.sh --check-only # what is persisted on this machine
+./t3-publish.sh --verify-only # whether the credential actually worked this boot
+```
+
+Then set `T3_PUBLISH_ACTIVITY=1` in `.env` and restart the stack. Setup state lives in
+`~/.t3/userdata/secrets`, so it survives `stop.sh` and reboots - there is nothing to re-run.
+
+`start.sh` checks the declared setting against what is persisted before bringing things
+up, and after the tunnel checks whether the relay link actually reconciled this boot.
+That second check matters: `npx t3 connect status` only reads local files, so it keeps
+reporting "provisioned" from stale secrets long after the credential stopped working.
+
 ## Stop
 
 ```bash

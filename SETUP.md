@@ -670,6 +670,63 @@ Direct connections bypass Cloudflare Access. The pairing code is the only gate,
 so enable this only on a network you trust. `t3-pair.sh` verifies the live bind
 matches `T3_BIND` and asks you to restart a backend started with the other mode.
 
+### 4F. Publishing agent activity (push notifications)
+
+Optional, off by default, and independent of everything above. T3 Connect can send
+push notifications and Live Activities to your mobile clients without a managed
+tunnel - the mode the app describes as "Works without a T3 Connect tunnel." That is
+the right mode here, since the tunnel is already yours.
+
+**Understand the trade first.** Push does not travel over your tunnel. This machine
+POSTs to `relay.t3.codes`, which fans out to APNs. On every meaningful thread event it
+sends the project title, thread title, phase, a short headline, up to 160 characters of
+detail, the model name, and environment/thread IDs, tied to your T3 cloud account. Link
+provisioning also registers this machine's local endpoint (`0.0.0.0:$T3_PORT`) with the
+relay as `providerKind: "manual"`. No code or diffs are sent. It is metadata, it is
+continuous, and it is the one part of this stack that leaves infrastructure you control.
+
+```bash
+./t3-publish.sh
+```
+
+It prints the same summary, asks for confirmation, then runs `connect login --headless`
+and `connect link --publish-only --headless`. Headless is deliberate: it prints a URL to
+open on any device and reads back a code, so this works over SSH with no browser on the
+Mac. `--publish-only` skips the managed-tunnel path entirely - the `cloudflared`
+install/confirm block is gated behind it - so it will not touch or compete with your
+`$TUNNEL_NAME` tunnel.
+
+Then set `T3_PUBLISH_ACTIVITY=1` in `.env` and restart the stack. The link is only
+provisioned when the backend starts, and `t3-pair.sh` reuses a live backend, so enabling
+this against a running stack does nothing until `./stop.sh && ./start.sh`.
+
+Fan-out is account-scoped, not pairing-scoped: the relay resolves the environment to the
+cloud accounts linked to it and pushes to those accounts' registered devices. The phone
+does not re-pair - it needs to be signed into the same T3 account, which registers its
+APNs token automatically. Notification deep links are relative (`/threads/<env>/<thread>`),
+so no tunnel hostname is embedded and taps resolve against the environment the app
+already knows.
+
+Setup state is not `.env` config. It is a set of mode-0600 files under
+`~/.t3/userdata/secrets` (`cloud-publish-agent-activity.bin`, `cloud-cli-oauth-token.bin`,
+`cloud-relay-*.bin`, `cloud-linked-user-id.bin`, `cloud-cli-desired-link.bin`). They
+survive `stop.sh`, `stop.sh --all`, and reboots, so there is nothing to re-run per boot.
+Only `./t3-publish.sh --disable` (stops publishing, keeps the sign-in), `connect unlink`,
+or `connect logout` undo it.
+
+**Why `start.sh` checks this twice.** `connect status` only reads those local files - it
+never contacts the relay - so `Authorization: stored credential` means a token file
+exists, not that it still refreshes. Meanwhile the backend re-mints the environment
+credential from the relay on *every* start. If that fails - revoked grant, logout from
+another machine, relay unreachable - the previously persisted secrets stay on disk and
+`connect status` keeps reporting `provisioned` while nothing is being delivered. So
+`--check-only` catches "never set up" or "flag drifted," and `--verify-only` reads
+`t3-serve.log` for the one line that proves the credential worked on this boot. The
+reconcile is forked behind a retry, so it lands seconds after the server reports ready;
+`--verify-only` waits up to 45s (`T3_PUBLISH_VERIFY_TIMEOUT` to change it) and treats a
+timeout as unknown rather than broken. It is skipped when the desktop app owns the port,
+since `t3-serve.log` then describes a process that is no longer listening.
+
 ## Step 5 - Orchestration (start.sh / stop.sh)
 
 `./start.sh [--detached] [ttl]` brings the stack up in order, each step gated
@@ -682,6 +739,10 @@ uses detached behavior automatically:
    expected variables and never executes it as shell code. `docker`, `cloudflared`,
    `claude`, `claudex`, `npx`, and required `jq` are checked on PATH (all missing
    reported at once); `qrencode` remains optional for terminal QR rendering.
+   `./t3-pair.sh --check-only` verifies `T3_CHANNEL` against the installed desktop
+   app, and `./t3-publish.sh --check-only` compares `T3_PUBLISH_ACTIVITY` against
+   what is persisted. Both run before anything starts; the publish check only warns,
+   since a notification setting should not block the stack.
 2. **caffeinate** - warns (not fails) off AC power. It reuses a valid
    CodeLaunch-owned `caffeinate -dims`; otherwise it reuses an exact pre-existing
    unowned assertion without claiming it, or starts and records its own process.
@@ -708,7 +769,13 @@ uses detached behavior automatically:
    to `$HOME/.codelaunch/run/cloudflared-t3.log` and poll for `Registered tunnel
    connection` (up to 30s, printing `tail -20` on timeout). Reused processes keep
    their existing log destination until restarted.
-8. **pairing token** - `./t3-pair.sh [--detached] [ttl]` rechecks the backend
+8. **publishing health** - `./t3-publish.sh --verify-only`, a no-op unless
+   `T3_PUBLISH_ACTIVITY=1`. It runs after the tunnel so the backend's link reconcile
+   has had that time to land, then reads `t3-serve.log` for the result and reports
+   any publishes that failed since boot. See
+   [4F](#4f-publishing-agent-activity-push-notifications) for why this is separate
+   from the `--check-only` pass.
+9. **pairing token** - `./t3-pair.sh [--detached] [ttl]` rechecks the backend
    and mints the one-time token only after the tunnel is ready. `start.sh` passes
    the TTL and detached choice through; it does not mint a second token.
 

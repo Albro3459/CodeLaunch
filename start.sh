@@ -6,7 +6,7 @@
 #   ./start.sh 5m         # custom TTL, passed to t3-pair.sh
 #   ./start.sh --detached # print pairing summary without the menu
 #
-# Order: prereqs, caffeinate, Docker, Codex token, proxy, T3 backend, tunnel, token.
+# Order: prereqs, caffeinate, Docker, Codex token, proxy, T3 backend, tunnel, publish check, token.
 # See SETUP.md "Step 5" and QUICK-SETUP.md.
 set -euo pipefail
 umask 077
@@ -40,7 +40,7 @@ done
 
 # --- a. env ---
 codelaunch_private_file .env
-codelaunch_load_env T3_HOSTNAME T3_PORT T3_BIND T3_CHANNEL T3_CHANNEL_SKIP_CHECK TUNNEL_NAME
+codelaunch_load_env T3_HOSTNAME T3_PORT T3_BIND T3_CHANNEL T3_CHANNEL_SKIP_CHECK T3_PUBLISH_ACTIVITY TUNNEL_NAME
 codelaunch_require_env T3_HOSTNAME T3_PORT TUNNEL_NAME
 : "${T3_BIND:=loopback}"
 if [ "$T3_BIND" = all ]; then
@@ -64,6 +64,10 @@ fi
 
 # T3_CHANNEL must match the installed desktop app, checked early so a mismatch fails fast instead of after a full bring-up.
 ./t3-pair.sh --check-only
+
+# Declared publishing intent vs what is actually on disk. Warn only - a notification
+# setting should not block the stack. Health is checked after the backend is up.
+./t3-publish.sh --check-only
 
 # --- c. power + keep-awake ---
 if pmset -g batt | grep -q 'AC Power'; then
@@ -197,7 +201,11 @@ else
   echo "tunnel registered"
 fi
 
-# --- i. one-time pairing token ---
+# --- i. publishing health ---
+# Runs after the tunnel so the backend's reconcile has had that time to land.
+./t3-publish.sh --verify-only
+
+# --- j. one-time pairing token ---
 echo "minting pairing token ..."
 PAIR_ARGS=("$TTL")
 [ "$DETACHED" = 1 ] && PAIR_ARGS+=(--detached)

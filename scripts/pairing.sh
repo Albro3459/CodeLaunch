@@ -52,7 +52,12 @@ codelaunch_pairing_present() {
         case "$choice" in
           ''|*[!0-9]*) printf 'Invalid URL number.\n'; continue ;;
         esac
-        i=$((choice - 1))
+        if [ "${#choice}" -gt 9 ]; then
+          printf 'Invalid URL number.\n'
+          continue
+        fi
+        # 10# forces base-10 so leading zeros are not read as octal
+        i=$((10#$choice - 1))
         if [ "$i" -lt 0 ] || [ "$i" -ge "${#urls[@]}" ]; then
           printf 'Invalid URL number.\n'
           continue

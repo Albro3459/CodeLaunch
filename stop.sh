@@ -126,43 +126,53 @@ if [ "$ALL" = 1 ]; then
   fi
 
   # --- g. CodeLaunch-owned caffeinate only ---
+  # start.sh reuses a pre-existing caffeinate without claiming it, so anything we did not record stays up.
   caffeinate_pid=''
+  caffeinate_left=''
   if caffeinate_pid=$(codelaunch_caffeinate_owned_pid); then
-    if codelaunch_caffeinate_record_pid &&
-      [ "$CODELAUNCH_CAFFEINATE_PID" = "$caffeinate_pid" ] &&
-      kill -0 "$caffeinate_pid" 2>/dev/null &&
-      codelaunch_caffeinate_exact_command "$caffeinate_pid" &&
-      [ "$(codelaunch_caffeinate_start_identity "$caffeinate_pid")" = "$CODELAUNCH_CAFFEINATE_START_IDENTITY" ]; then
-      kill "$caffeinate_pid" 2>/dev/null || true
-      for _ in $(seq 1 10); do
-        kill -0 "$caffeinate_pid" 2>/dev/null || break
-        sleep 1
-      done
-      if kill -0 "$caffeinate_pid" 2>/dev/null &&
-        codelaunch_caffeinate_record_pid &&
-        [ "$CODELAUNCH_CAFFEINATE_PID" = "$caffeinate_pid" ] &&
-        codelaunch_caffeinate_exact_command "$caffeinate_pid" &&
-        [ "$(codelaunch_caffeinate_start_identity "$caffeinate_pid")" = "$CODELAUNCH_CAFFEINATE_START_IDENTITY" ]; then
-        kill -9 "$caffeinate_pid" 2>/dev/null || true
-      fi
-      if ! kill -0 "$caffeinate_pid" 2>/dev/null; then
-        codelaunch_caffeinate_clear_record
-        echo "CodeLaunch-owned caffeinate stopped"
-      else
-        echo "WARNING: CodeLaunch-owned caffeinate is still running"
-      fi
+    kill "$caffeinate_pid" 2>/dev/null || true
+    for _ in $(seq 1 10); do
+      kill -0 "$caffeinate_pid" 2>/dev/null || break
+      sleep 1
+    done
+    # Re-check before SIGKILL, since the PID could have been recycled during the grace period.
+    if codelaunch_caffeinate_record_matches "$caffeinate_pid"; then
+      kill -9 "$caffeinate_pid" 2>/dev/null || true
+    fi
+    if ! kill -0 "$caffeinate_pid" 2>/dev/null; then
+      codelaunch_caffeinate_clear_record
+      echo "CodeLaunch-owned caffeinate stopped"
     else
-      echo "WARNING: caffeinate ownership changed; refusing to signal PID $caffeinate_pid"
+      caffeinate_left=$caffeinate_pid
+      echo "WARNING: CodeLaunch-owned caffeinate is still running (PID $caffeinate_pid)"
+      echo "  Stop it with: kill $caffeinate_pid"
     fi
   else
     caffeinate_status=$?
+    unowned=$(codelaunch_caffeinate_exact_pids | tr '\n' ' ')
+    unowned=${unowned% }
+    case "$unowned" in
+      '')   unowned_label='' ;;
+      *\ *) unowned_label="PIDs $unowned" ;;
+      *)    unowned_label="PID $unowned" ;;
+    esac
     if [ "$caffeinate_status" -eq 1 ]; then
-      echo "no CodeLaunch-owned caffeinate running"
+      if [ -n "$unowned" ]; then
+        caffeinate_left=$unowned
+        echo "caffeinate -dims is running but not owned by CodeLaunch ($unowned_label) - leaving it up"
+        echo "  Stop it with: kill $unowned"
+      else
+        echo "no CodeLaunch-owned caffeinate running"
+      fi
     else
+      caffeinate_left=${unowned:-unknown}
       echo "WARNING: invalid caffeinate ownership record; leaving caffeinate running"
+      [ -z "$unowned" ] || echo "  Running caffeinate -dims ($unowned_label) - stop it with: kill $unowned"
     fi
   fi
-  echo "native Claude Code sessions and T3 Connect relays remain running"
+  remaining="native Claude Code sessions and T3 Connect relays"
+  [ -z "$caffeinate_left" ] || remaining="$remaining, plus caffeinate ($caffeinate_left)"
+  echo "$remaining remain running"
 else
   # --- f. left running on purpose ---
   echo "left running: Docker Desktop + daemon, native Claude Code sessions, caffeinate, T3 Connect relays"

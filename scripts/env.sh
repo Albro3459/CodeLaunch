@@ -249,7 +249,8 @@ codelaunch_caffeinate_clear_record() {
 
 codelaunch_caffeinate_start_identity() {
   local pid=$1 identity
-  identity=$(ps -p "$pid" -o lstart= 2>/dev/null | awk '{$1=$1; print}') || return 1
+  # Pin locale/timezone so the recorded identity compares stably across DST changes
+  identity=$(LC_ALL=C TZ=UTC ps -p "$pid" -o lstart= 2>/dev/null | awk '{$1=$1; print}') || return 1
   [ -n "$identity" ] || return 1
   printf '%s\n' "$identity"
 }
@@ -266,6 +267,18 @@ codelaunch_caffeinate_exact_command() {
   esac
 }
 
+# True when $1 is still the exact caffeinate recorded in the PID file.
+# Re-reads the record each call so it can be used again after a signal, when the PID may have been recycled.
+codelaunch_caffeinate_record_matches() {
+  local pid=$1
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  codelaunch_caffeinate_record_pid || return 1
+  [ "$CODELAUNCH_CAFFEINATE_PID" = "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  codelaunch_caffeinate_exact_command "$pid" || return 1
+  [ "$(codelaunch_caffeinate_start_identity "$pid")" = "$CODELAUNCH_CAFFEINATE_START_IDENTITY" ]
+}
+
 codelaunch_caffeinate_owned_pid() {
   local pid rc
   codelaunch_caffeinate_record_pid
@@ -275,9 +288,7 @@ codelaunch_caffeinate_owned_pid() {
     2) return 2 ;;
   esac
   pid=$CODELAUNCH_CAFFEINATE_PID
-  if kill -0 "$pid" 2>/dev/null &&
-    codelaunch_caffeinate_exact_command "$pid" &&
-    [ "$(codelaunch_caffeinate_start_identity "$pid")" = "$CODELAUNCH_CAFFEINATE_START_IDENTITY" ]; then
+  if codelaunch_caffeinate_record_matches "$pid"; then
     printf '%s\n' "$pid"
     return 0
   fi

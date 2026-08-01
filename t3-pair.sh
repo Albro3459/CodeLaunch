@@ -157,12 +157,21 @@ else
 fi
 
 listener_rows=$(listening || true)
-listener_pid=$(printf '%s\n' "$listener_rows" | awk 'NR == 2 { print $2 }')
 listener_lines=$(printf '%s\n' "$listener_rows" | tail -n +2)
-if [ -z "$listener_pid" ] || ! ps -p "$listener_pid" -o command= >/dev/null 2>&1; then
+# A dual-stack bind prints one row per socket, so collapse to the distinct owning PIDs.
+listener_pids=$(printf '%s\n' "$listener_lines" | awk 'NF { print $2 }' | sort -u)
+live_pids=''
+for p in $listener_pids; do
+  ps -p "$p" -o command= >/dev/null 2>&1 && live_pids="${live_pids:+$live_pids }$p"
+done
+if [ -z "$live_pids" ]; then
   echo "REFUSING: no live backend process owns :$T3_PORT."
   exit 1
 fi
+case "$live_pids" in
+  *\ *) pid_label="PIDs $live_pids"; echo "note: multiple processes are listening on :$T3_PORT" ;;
+  *)    pid_label="PID $live_pids" ;;
+esac
 if [ "$T3_BIND" = loopback ]; then
   non_loopback=$(printf '%s\n' "$listener_lines" | grep -vE '(^|[[:space:]])(127\.0\.0\.1|\[::1\]|::1):' || true)
   if [ -n "$non_loopback" ]; then
@@ -170,7 +179,7 @@ if [ "$T3_BIND" = loopback ]; then
     echo "$non_loopback"
     exit 1
   fi
-  echo "backend check ok (PID $listener_pid, loopback only)"
+  echo "backend check ok ($pid_label, loopback only)"
 else
   if ! printf '%s\n' "$listener_lines" | grep -qE '(^|[[:space:]])(\*|0\.0\.0\.0):'"$T3_PORT"'([[:space:]]|$)'; then
     echo "REFUSING: T3_BIND=all but nothing is listening on the wildcard address."
@@ -178,7 +187,7 @@ else
     printf '%s\n' "$listener_lines"
     exit 1
   fi
-  echo "backend check ok (PID $listener_pid, wildcard bind)"
+  echo "backend check ok ($pid_label, wildcard bind)"
 fi
 
 if [ "$MODE" = ensure ]; then exit 0; fi

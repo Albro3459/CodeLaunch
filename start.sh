@@ -16,6 +16,7 @@ cd "$(dirname "$0")"
 usage() {
   cat <<'EOF'
 Usage: ./start.sh [-d|--detached] [TTL]
+       ./start.sh -h|--help
 EOF
 }
 

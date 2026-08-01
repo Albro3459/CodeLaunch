@@ -83,7 +83,16 @@ else
   else
     nohup caffeinate -dims >/dev/null 2>&1 &
     caffeinate_pid=$!
-    if ! kill -0 "$caffeinate_pid" 2>/dev/null || ! codelaunch_caffeinate_exact_command "$caffeinate_pid"; then
+    caffeinate_verified=0
+    for _ in $(seq 1 20); do
+      kill -0 "$caffeinate_pid" 2>/dev/null || break
+      if codelaunch_caffeinate_exact_command "$caffeinate_pid"; then
+        caffeinate_verified=1
+        break
+      fi
+      sleep 0.05
+    done
+    if [ "$caffeinate_verified" -ne 1 ]; then
       echo "caffeinate -dims failed verification" >&2
       exit 1
     fi

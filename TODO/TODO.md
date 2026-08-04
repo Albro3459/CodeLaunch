@@ -7,7 +7,8 @@ off-network devices.
 
 ## Open
 
-_Nothing open._
+- [ ] [Manage the Codex Web GPT launcher lifecycle](CODEX-WEB-GPT-LIFECYCLE.md)
+  with opt-in, reversible route connect/disconnect behavior.
 
 ## Recurring
 

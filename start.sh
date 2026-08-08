@@ -227,6 +227,7 @@ start_codex_web_gpt() {
     launcher_status=$?
     if [ "$launcher_status" -eq 2 ]; then
       echo "WARNING: invalid Codex Web GPT ownership record; refusing to claim or launch the app."
+      echo "  Inspect and remove $HOME/.codelaunch/run/codex-web-gpt.pid, then rerun ./start.sh."
       return 0
     fi
   fi

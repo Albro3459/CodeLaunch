@@ -497,12 +497,14 @@ codelaunch_codex_web_gpt_owned_pid() {
     2) return 2 ;;
   esac
   pid=$CODELAUNCH_CODEX_WEB_GPT_PID
-  kill -0 "$pid" 2>/dev/null || return 2
   if codelaunch_codex_web_gpt_record_matches "$pid"; then
     printf '%s\n' "$pid"
     return 0
   fi
-  return 2
+  # Provably not the recorded launcher any more (dead or recycled PID), so the
+  # record is stale rather than untrustworthy - drop it instead of wedging start.
+  codelaunch_codex_web_gpt_clear_record || return 2
+  return 1
 }
 
 codelaunch_codex_web_gpt_write_pid() {

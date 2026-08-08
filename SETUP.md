@@ -942,9 +942,10 @@ behaves identically with and without `--all`:
   as CodeLaunch-owned, still alive, and still matching on PID, executable path,
   and start time gets a normal application quit:
   `osascript -e 'tell application id "dev.codexwebgpt.launcher" to quit'`.
-  A launcher it did not start is left running and reported. A stale, malformed,
-  symlinked, or mismatched record fails closed - the app is left running and
-  nothing is signalled.
+  A launcher it did not start is left running and reported. A malformed or
+  symlinked record fails closed - the app is left running and nothing is
+  signalled. A stale or mismatched record never causes a signal either; it is
+  only cleared once the launcher and its runtime are confirmed gone.
 - It waits up to 60s for the app to drain and exit, rechecking identity each
   second. There is no escalation: no `kill`, no `kill -9`, no `pkill`, no Bun
   signal, no touching the browser helper or tunnel. A launcher still up after

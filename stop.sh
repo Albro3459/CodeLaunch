@@ -169,13 +169,9 @@ stop_codex_web_gpt() {
 
   if codelaunch_codex_web_gpt_record_pid; then
     owned_pid=$CODELAUNCH_CODEX_WEB_GPT_PID
-    if kill -0 "$owned_pid" 2>/dev/null; then
-      if codelaunch_codex_web_gpt_record_matches "$owned_pid"; then
-        ownership_status=owned
-      else
-        echo "WARNING: Codex Web GPT ownership record no longer matches its live PID; leaving the launcher running."
-        return 0
-      fi
+    # A dead PID and one recycled to another process are both stale, not a conflict.
+    if codelaunch_codex_web_gpt_record_matches "$owned_pid"; then
+      ownership_status=owned
     else
       ownership_status=stale
     fi
@@ -235,6 +231,8 @@ stop_codex_web_gpt() {
   for _ in $(seq 1 60); do
     if ! kill -0 "$owned_pid" 2>/dev/null; then break; fi
     if ! codelaunch_codex_web_gpt_record_matches "$owned_pid"; then
+      # The quit can land between the liveness check above and this recheck.
+      kill -0 "$owned_pid" 2>/dev/null || break
       echo "WARNING: Codex Web GPT PID identity changed during shutdown; ownership retained and no signal was sent."
       return 0
     fi

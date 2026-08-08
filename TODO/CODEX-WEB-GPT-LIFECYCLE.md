@@ -71,6 +71,24 @@ stable shim and document that prerequisite.
   `$CODEX_WEB_GPT_APPLICATIONS_DIR`, `/Applications`, and `~/Applications`, then
   Spotlight, with `plutil` confirming `CFBundleIdentifier` on each candidate. No
   AppleEvent is sent and nothing is launched to answer the question.
+- [x] A stale ownership record wedged both scripts instead of self-healing.
+  `codelaunch_codex_web_gpt_owned_pid` returned 2 when the record was well-formed
+  but its PID was dead or recycled, and never cleared it, so after a reboot,
+  crash, or manual quit every `./start.sh` bailed with "invalid ownership record"
+  before it could repair the route - leaving the journal active against a dead
+  loopback daemon and native Codex broken until the file was deleted by hand.
+  `stop.sh` had the same trap on the recycled-PID branch, which returned and kept
+  the record forever. Now `owned_pid` clears a provably stale record and returns
+  1 (not owned), exactly like `codelaunch_caffeinate_owned_pid`; rc 2 means only
+  a malformed or symlinked record, and that warning now names the file to remove.
+  `stop.sh` classifies both a dead and a recycled PID as stale and falls into the
+  existing stale flow, which still refuses to signal anything and clears the
+  record only once the launcher and its `/healthz` runtime are confirmed gone.
+  Also fixed the quit-wait race: if the launcher exited between the loop's
+  `kill -0` and the identity recheck, the recheck failure was reported as
+  "PID identity changed during shutdown" and the record was retained even though
+  the quit succeeded. The loop now rechecks liveness and breaks into the normal
+  clean-exit path when the process is gone.
 
 ## Setup detection
 

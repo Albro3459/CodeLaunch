@@ -227,19 +227,45 @@ codelaunch_codex_web_gpt_app_path() {
   printf '%s\n' "$app_path"
 }
 
+codelaunch_codex_web_gpt_home() {
+  local home=${CODEX_CHATGPT_WEB_HOME:-$HOME/.codex-chatgpt-web}
+  home=${home%/}
+  [ -d "$home" ] || return 1
+  printf '%s\n' "$home"
+}
+
+# The macOS installer ships only the app bundle, so the CLI exists only in the
+# private runtime directory the launcher provisions per release. config.json
+# names the live release, which is what keeps this correct across updates -
+# older version directories are left on disk and must not be picked up.
+codelaunch_codex_web_gpt_runtime_cli() {
+  local home version arch cli
+  command -v jq >/dev/null 2>&1 || return 1
+  home=$(codelaunch_codex_web_gpt_home) || return 1
+  [ -f "$home/config.json" ] || return 1
+  version=$(jq -re '.releaseVersion // empty' "$home/config.json" 2>/dev/null) || return 1
+  case "$version" in
+    ''|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  case "$(uname -m)" in
+    arm64|aarch64) arch=arm64 ;;
+    x86_64|amd64) arch=x64 ;;
+    *) return 1 ;;
+  esac
+  cli="$home/versions/$version-darwin-$arch/bin/codex-chatgpt-web"
+  [ ! -L "$cli" ] || return 1
+  [ -x "$cli" ] || return 1
+  printf '%s\n' "$cli"
+}
+
 codelaunch_codex_web_gpt_cli() {
-  local app_path=${1:-} cli
+  local cli
   cli=$(command -v codex-chatgpt-web 2>/dev/null || true)
   if [ -n "$cli" ] && [ -x "$cli" ]; then
     printf '%s\n' "$cli"
     return 0
   fi
-  if [ -z "$app_path" ]; then
-    app_path=$(codelaunch_codex_web_gpt_app_path) || return 1
-  fi
-  cli="$app_path/Contents/Resources/runtime/bin/codex-chatgpt-web"
-  [ -x "$cli" ] || return 1
-  printf '%s\n' "$cli"
+  codelaunch_codex_web_gpt_runtime_cli
 }
 
 codelaunch_codex_web_gpt_read_route_status() {

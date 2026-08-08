@@ -121,7 +121,7 @@ stop_codex_web_gpt() {
   echo "disconnecting Codex Web GPT ..."
 
   app_path=$(codelaunch_codex_web_gpt_app_path || true)
-  if ! cli=$(codelaunch_codex_web_gpt_cli "$app_path"); then
+  if ! cli=$(codelaunch_codex_web_gpt_cli); then
     echo "WARNING: Codex Web GPT CLI is unavailable; leaving its route and launcher unchanged."
     return 0
   fi

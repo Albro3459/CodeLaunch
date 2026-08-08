@@ -196,7 +196,7 @@ start_codex_web_gpt() {
     echo "  Install and complete setup in the Codex Web GPT launcher, disable Launch at login, then rerun ./start.sh."
     return 0
   fi
-  if ! cli=$(codelaunch_codex_web_gpt_cli "$app_path"); then
+  if ! cli=$(codelaunch_codex_web_gpt_cli); then
     echo "WARNING: Codex Web GPT CLI is unavailable; continuing without managed web-backed Codex models."
     echo "  Repair or reinstall the launcher, complete setup there, then rerun ./start.sh."
     return 0

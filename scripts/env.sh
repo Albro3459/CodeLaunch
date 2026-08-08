@@ -217,14 +217,35 @@ codelaunch_prepare_runtime() {
   export CODELAUNCH_RUNTIME_DIR
 }
 
-codelaunch_codex_web_gpt_app_path() {
-  local app_path executable
-  app_path=$(/usr/bin/osascript -e 'POSIX path of (path to application id "dev.codexwebgpt.launcher")' 2>/dev/null) || return 1
+codelaunch_codex_web_gpt_verify_app() {
+  local app_path=${1:-}
+  [ -n "$app_path" ] || return 1
   app_path=${app_path%/}
-  executable="$app_path/Contents/MacOS/Codex Web GPT"
   [ -d "$app_path" ] || return 1
-  [ -x "$executable" ] || return 1
+  [ -x "$app_path/Contents/MacOS/Codex Web GPT" ] || return 1
+  [ "$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$app_path/Contents/Info.plist" 2>/dev/null)" \
+    = dev.codexwebgpt.launcher ] || return 1
   printf '%s\n' "$app_path"
+}
+
+# Launch Services' `path to application id` sends an AppleEvent to the target, so
+# it stalls for a minute and then fails with -1712 when the launcher is installed
+# but not running - which is the usual case at start. Check the locations
+# install-launcher.sh writes to, fall back to Spotlight, and confirm the bundle
+# identifier either way.
+codelaunch_codex_web_gpt_app_path() {
+  local candidate candidates=()
+  [ -z "${CODEX_WEB_GPT_APPLICATIONS_DIR:-}" ] \
+    || candidates+=("${CODEX_WEB_GPT_APPLICATIONS_DIR%/}/Codex Web GPT.app")
+  candidates+=("/Applications/Codex Web GPT.app" "$HOME/Applications/Codex Web GPT.app")
+  for candidate in "${candidates[@]}"; do
+    codelaunch_codex_web_gpt_verify_app "$candidate" && return 0
+  done
+  command -v mdfind >/dev/null 2>&1 || return 1
+  while IFS= read -r candidate; do
+    codelaunch_codex_web_gpt_verify_app "$candidate" && return 0
+  done < <(mdfind "kMDItemCFBundleIdentifier == 'dev.codexwebgpt.launcher'" 2>/dev/null)
+  return 1
 }
 
 codelaunch_codex_web_gpt_home() {

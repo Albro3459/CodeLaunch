@@ -901,7 +901,10 @@ immediately. At `0` neither script looks at Codex Web GPT at all.
 session sees the intended route and model list. Every failure below is a warning
 that does not stop the rest of the stack:
 
-1. Resolve the app by bundle id, and the CLI from PATH or the live release in
+1. Resolve the app and the CLI. The app is looked for in
+   `$CODEX_WEB_GPT_APPLICATIONS_DIR`, `/Applications`, and `~/Applications`, then
+   via Spotlight, and every candidate must carry the `dev.codexwebgpt.launcher`
+   bundle identifier. The CLI comes from PATH or the live release in
    `config.json`. Missing either one warns and returns.
 2. Read `route status`. It requires `installed: true`, no `errors`, and a
    loopback `routeUrl` of the exact form `http://127.0.0.1:<port>/v1`. A

@@ -62,12 +62,15 @@ stable shim and document that prerequisite.
   `versions/<version>-darwin-<arch>/bin/codex-chatgpt-web`, so launcher updates
   are picked up without touching PATH. An on-PATH CLI still wins if present. No
   manual symlink is needed and the docs no longer ask for one.
-- [ ] `codelaunch_codex_web_gpt_app_path` stalls when the launcher is not
+- [x] `codelaunch_codex_web_gpt_app_path` stalled when the launcher was not
   running. `osascript -e 'POSIX path of (path to application id ...)'` sends an
   AppleEvent to the target; with the app installed but stopped it ran for over a
   minute and then failed with `-1712 AppleEvent timed out`. That is the primary
-  start path, so it stalls `start.sh` and `stop.sh` and then reports the app as
-  missing. Resolve the bundle without sending an AppleEvent.
+  start path, so it stalled `start.sh` and `stop.sh` and then reported the app as
+  missing. Replaced with a filesystem lookup over
+  `$CODEX_WEB_GPT_APPLICATIONS_DIR`, `/Applications`, and `~/Applications`, then
+  Spotlight, with `plutil` confirming `CFBundleIdentifier` on each candidate. No
+  AppleEvent is sent and nothing is launched to answer the question.
 
 ## Setup detection
 

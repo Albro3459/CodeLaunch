@@ -6,7 +6,7 @@
 #   ./start.sh 5m         # custom TTL, passed to t3-pair.sh
 #   ./start.sh --detached # print pairing summary without the menu
 #
-# Order: prereqs, caffeinate, Docker, Codex token, proxy, T3 backend, tunnel, publish check, token.
+# Order: prereqs, caffeinate, Docker, Codex token, proxy, Codex Web GPT, T3 backend, tunnel, publish check, token.
 # See SETUP.md "Step 5" and QUICK-SETUP.md.
 set -euo pipefail
 umask 077
@@ -40,9 +40,14 @@ done
 
 # --- a. env ---
 codelaunch_private_file .env
-codelaunch_load_env T3_HOSTNAME T3_PORT T3_BIND T3_CHANNEL T3_CHANNEL_SKIP_CHECK T3_PUBLISH_ACTIVITY TUNNEL_NAME
+codelaunch_load_env T3_HOSTNAME T3_PORT T3_BIND T3_CHANNEL T3_CHANNEL_SKIP_CHECK T3_PUBLISH_ACTIVITY CODEX_WEB_GPT_MANAGED TUNNEL_NAME
 codelaunch_require_env T3_HOSTNAME T3_PORT TUNNEL_NAME
 : "${T3_BIND:=loopback}"
+: "${CODEX_WEB_GPT_MANAGED:=0}"
+case "$CODEX_WEB_GPT_MANAGED" in
+  0|1) ;;
+  *) echo "CODEX_WEB_GPT_MANAGED must be '0' or '1', got '$CODEX_WEB_GPT_MANAGED'"; exit 1 ;;
+esac
 if [ "$T3_BIND" = all ]; then
   echo "WARNING: T3_BIND=all exposes :$T3_PORT to your LAN/VPN; pairing code only"
 fi
@@ -178,11 +183,168 @@ if ! printf 'header = "Authorization: Bearer %s"\n' "$KEY" \
 fi
 echo "proxy up and key accepted"
 
-# --- g. T3 backend ---
+# --- g. Codex Web GPT (optional, nonfatal) ---
+start_codex_web_gpt() {
+  [ "$CODEX_WEB_GPT_MANAGED" = 1 ] || return 0
+
+  local app_path cli health_url route_url launcher_pid='' launcher_status owned_pid='' owned_status=unowned
+  local launcher_was_running=0 route_connected_here=0
+  echo "ensuring Codex Web GPT ..."
+
+  if ! app_path=$(codelaunch_codex_web_gpt_app_path); then
+    echo "WARNING: Codex Web GPT is not installed; continuing without managed web-backed Codex models."
+    echo "  Install and complete setup in the Codex Web GPT launcher, disable Launch at login, then rerun ./start.sh."
+    return 0
+  fi
+  if ! cli=$(codelaunch_codex_web_gpt_cli "$app_path"); then
+    echo "WARNING: Codex Web GPT CLI is unavailable; continuing without managed web-backed Codex models."
+    echo "  Repair or reinstall the launcher, complete setup there, then rerun ./start.sh."
+    return 0
+  fi
+  if ! codelaunch_codex_web_gpt_read_route_status "$cli"; then
+    echo "WARNING: could not inspect the Codex Web GPT route; continuing without changing it."
+    [ -z "$CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL" ] || echo "  $CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL"
+    return 0
+  fi
+  if [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_INSTALLED" != true ]; then
+    echo "WARNING: Codex Web GPT is installed but its Codex integration is not set up."
+    echo "  Complete setup in the launcher, disable Launch at login, then rerun ./start.sh."
+    return 0
+  fi
+  if [ -n "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_ERRORS" ]; then
+    echo "WARNING: Codex Web GPT route state is inconsistent; continuing without changing it."
+    echo "  $CODELAUNCH_CODEX_WEB_GPT_ROUTE_ERRORS"
+    return 0
+  fi
+  if ! health_url=$(codelaunch_codex_web_gpt_health_url "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_URL"); then
+    echo "WARNING: Codex Web GPT reported a non-loopback or invalid route; continuing without changing it."
+    return 0
+  fi
+  route_url=$CODELAUNCH_CODEX_WEB_GPT_ROUTE_URL
+  if owned_pid=$(codelaunch_codex_web_gpt_owned_pid); then
+    owned_status=owned
+  else
+    launcher_status=$?
+    if [ "$launcher_status" -eq 2 ]; then
+      echo "WARNING: invalid Codex Web GPT ownership record; refusing to claim or launch the app."
+      return 0
+    fi
+  fi
+
+  if launcher_pid=$(codelaunch_codex_web_gpt_running_pid "$app_path"); then
+    launcher_was_running=1
+    if [ "$owned_status" = owned ] && [ "$owned_pid" != "$launcher_pid" ]; then
+      echo "WARNING: Codex Web GPT ownership does not match the running launcher; leaving it unchanged."
+      return 0
+    fi
+    if [ "$owned_status" = owned ]; then
+      echo "Codex Web GPT launcher already owned by CodeLaunch (reusing PID $launcher_pid)"
+    else
+      echo "Codex Web GPT launcher already running (reusing without claiming PID $launcher_pid)"
+    fi
+  else
+    launcher_status=$?
+    if [ "$launcher_status" -eq 2 ]; then
+      echo "WARNING: multiple Codex Web GPT launcher processes found; leaving them unchanged."
+      return 0
+    fi
+    if [ "$owned_status" = owned ]; then
+      echo "WARNING: recorded Codex Web GPT launcher is not the installed app; leaving it unchanged."
+      return 0
+    fi
+  fi
+
+  # The external CLI only changes Codex configuration. The launcher starts its
+  # supervised runtime at process startup when that route is active, so a stopped
+  # launcher must be connected immediately before it is opened. Any later failure
+  # compensates with route disconnect so native Codex is not stranded on loopback.
+  if [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_ACTIVE" != true ]; then
+    if ! codelaunch_codex_web_gpt_set_route "$cli" connect; then
+      echo "WARNING: Codex Web GPT route connect failed; continuing without managed web-backed models."
+      [ -z "$CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL" ] || echo "  $CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL"
+      return 0
+    fi
+    if ! codelaunch_codex_web_gpt_read_route_status "$cli" \
+      || [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_INSTALLED" != true ] \
+      || [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_ACTIVE" != true ] \
+      || [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_URL" != "$route_url" ] \
+      || [ -n "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_ERRORS" ]; then
+      echo "WARNING: Codex Web GPT route did not verify after connect; attempting to restore native routing."
+      codelaunch_codex_web_gpt_set_route "$cli" disconnect || true
+      return 0
+    fi
+    route_connected_here=1
+  fi
+
+  if [ -z "$launcher_pid" ]; then
+    echo "starting Codex Web GPT hidden ..."
+    if ! open -g -j "$app_path" --args --hidden; then
+      echo "WARNING: Codex Web GPT launcher did not open."
+      if [ "$route_connected_here" = 1 ] || [ "$launcher_was_running" = 0 ]; then
+        codelaunch_codex_web_gpt_set_route "$cli" disconnect || true
+      fi
+      return 0
+    fi
+    for _ in $(seq 1 30); do
+      if launcher_pid=$(codelaunch_codex_web_gpt_running_pid "$app_path"); then
+        break
+      else
+        launcher_status=$?
+      fi
+      [ "$launcher_status" -ne 2 ] || break
+      sleep 1
+    done
+    if [ -z "$launcher_pid" ] || [ "${launcher_status:-0}" -eq 2 ]; then
+      echo "WARNING: Codex Web GPT launcher process could not be verified."
+      if [ "$route_connected_here" = 1 ] || [ "$launcher_was_running" = 0 ]; then
+        codelaunch_codex_web_gpt_set_route "$cli" disconnect || true
+      fi
+      return 0
+    fi
+    if ! codelaunch_codex_web_gpt_write_pid "$launcher_pid" "$app_path/Contents/MacOS/Codex Web GPT"; then
+      echo "WARNING: Codex Web GPT started, but CodeLaunch could not record exact ownership; it will be left running on stop."
+      codelaunch_codex_web_gpt_clear_record || true
+    else
+      echo "started Codex Web GPT hidden (owned PID $launcher_pid)"
+    fi
+  fi
+
+  if codelaunch_codex_web_gpt_wait_health "$health_url" 60; then
+    if ! codelaunch_codex_web_gpt_doctor_ok "$cli"; then
+      echo "WARNING: Codex Web GPT doctor did not verify the running setup."
+      [ -z "$CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL" ] || echo "  $CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL"
+    elif codelaunch_codex_web_gpt_read_route_status "$cli" \
+      && [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_INSTALLED" = true ] \
+      && [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_ACTIVE" = true ] \
+      && [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_URL" = "$route_url" ] \
+      && [ -z "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_ERRORS" ]; then
+      echo "Codex Web GPT runtime healthy and route connected"
+      return 0
+    else
+      echo "WARNING: Codex Web GPT became healthy, but its connected route did not verify."
+    fi
+  else
+    echo "WARNING: Codex Web GPT runtime did not become healthy within 60s."
+  fi
+
+  if [ "$route_connected_here" = 1 ] || [ "$launcher_was_running" = 0 ]; then
+    if codelaunch_codex_web_gpt_set_route "$cli" disconnect \
+      && codelaunch_codex_web_gpt_read_route_status "$cli" \
+      && [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_ACTIVE" = false ] \
+      && [ -z "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_ERRORS" ]; then
+      echo "restored native Codex routing after Codex Web GPT startup failure"
+    else
+      echo "WARNING: native Codex routing could not be restored; leave the launcher running and repair its bridge in Settings."
+    fi
+  fi
+}
+start_codex_web_gpt
+
+# --- h. T3 backend ---
 echo "ensuring T3 backend ..."
 ./t3-pair.sh --ensure-only
 
-# --- h. tunnel ---
+# --- i. tunnel ---
 if [ -n "$(codelaunch_tunnel_pids "$TUNNEL_NAME")" ]; then
   echo "tunnel $TUNNEL_NAME already running (reusing)"
 else
@@ -201,11 +363,11 @@ else
   echo "tunnel registered"
 fi
 
-# --- i. publishing health ---
+# --- j. publishing health ---
 # Runs after the tunnel so the backend's reconcile has had that time to land.
 ./t3-publish.sh --verify-only
 
-# --- j. one-time pairing token ---
+# --- k. one-time pairing token ---
 echo "minting pairing token ..."
 PAIR_ARGS=("$TTL")
 [ "$DETACHED" = 1 ] && PAIR_ARGS+=(--detached)

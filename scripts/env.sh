@@ -11,7 +11,7 @@ codelaunch_trim() {
 
 codelaunch_allowed_env() {
   case "$1" in
-    T3_HOSTNAME|T3_PORT|T3_BIND|T3_CHANNEL|T3_CHANNEL_SKIP_CHECK|T3_PUBLISH_ACTIVITY|TUNNEL_NAME|ACCESS_EMAIL|CLOUDFLARE_TEAM) return 0 ;;
+    T3_HOSTNAME|T3_PORT|T3_BIND|T3_CHANNEL|T3_CHANNEL_SKIP_CHECK|T3_PUBLISH_ACTIVITY|CODEX_WEB_GPT_MANAGED|TUNNEL_NAME|ACCESS_EMAIL|CLOUDFLARE_TEAM) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -215,6 +215,258 @@ codelaunch_prepare_runtime() {
   mkdir -p "$root" "$CODELAUNCH_RUNTIME_DIR"
   chmod 700 "$root" "$CODELAUNCH_RUNTIME_DIR"
   export CODELAUNCH_RUNTIME_DIR
+}
+
+codelaunch_codex_web_gpt_app_path() {
+  local app_path executable
+  app_path=$(/usr/bin/osascript -e 'POSIX path of (path to application id "dev.codexwebgpt.launcher")' 2>/dev/null) || return 1
+  app_path=${app_path%/}
+  executable="$app_path/Contents/MacOS/Codex Web GPT"
+  [ -d "$app_path" ] || return 1
+  [ -x "$executable" ] || return 1
+  printf '%s\n' "$app_path"
+}
+
+codelaunch_codex_web_gpt_cli() {
+  local app_path=${1:-} cli
+  cli=$(command -v codex-chatgpt-web 2>/dev/null || true)
+  if [ -n "$cli" ] && [ -x "$cli" ]; then
+    printf '%s\n' "$cli"
+    return 0
+  fi
+  if [ -z "$app_path" ]; then
+    app_path=$(codelaunch_codex_web_gpt_app_path) || return 1
+  fi
+  cli="$app_path/Contents/Resources/runtime/bin/codex-chatgpt-web"
+  [ -x "$cli" ] || return 1
+  printf '%s\n' "$cli"
+}
+
+codelaunch_codex_web_gpt_read_route_status() {
+  local cli=$1 output
+  CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL=''
+  CODELAUNCH_CODEX_WEB_GPT_ROUTE_INSTALLED=''
+  CODELAUNCH_CODEX_WEB_GPT_ROUTE_ACTIVE=''
+  CODELAUNCH_CODEX_WEB_GPT_ROUTE_URL=''
+  CODELAUNCH_CODEX_WEB_GPT_ROUTE_ERRORS=''
+  command -v jq >/dev/null 2>&1 || {
+    CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL='jq is required to validate Codex Web GPT route status'
+    return 1
+  }
+  if ! output=$("$cli" route status 2>&1); then
+    CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL=$output
+    return 1
+  fi
+  if ! printf '%s' "$output" | jq -e '
+    type == "object" and
+    (.installed | type == "boolean") and
+    (.active | type == "boolean") and
+    (.errors | type == "array") and
+    all(.errors[]; type == "string") and
+    ((has("routeUrl") | not) or (.routeUrl | type == "string"))
+  ' >/dev/null 2>&1; then
+    CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL='route status returned invalid or incomplete JSON'
+    return 1
+  fi
+  CODELAUNCH_CODEX_WEB_GPT_ROUTE_INSTALLED=$(printf '%s' "$output" | jq -r '.installed')
+  CODELAUNCH_CODEX_WEB_GPT_ROUTE_ACTIVE=$(printf '%s' "$output" | jq -r '.active')
+  CODELAUNCH_CODEX_WEB_GPT_ROUTE_URL=$(printf '%s' "$output" | jq -r '.routeUrl // empty')
+  CODELAUNCH_CODEX_WEB_GPT_ROUTE_ERRORS=$(printf '%s' "$output" | jq -r '.errors | join("; ")')
+}
+
+codelaunch_codex_web_gpt_set_route() {
+  local cli=$1 action=$2 output
+  CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL=''
+  case "$action" in connect|disconnect) ;; *) return 2 ;; esac
+  if ! output=$("$cli" route "$action" 2>&1); then
+    CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL=$output
+    return 1
+  fi
+  if ! printf '%s' "$output" | jq -e 'type == "object" and (.active | type == "boolean")' >/dev/null 2>&1; then
+    CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL="route $action returned invalid or incomplete JSON"
+    return 1
+  fi
+}
+
+codelaunch_codex_web_gpt_health_url() {
+  local route_url=$1 port port_number
+  if [[ "$route_url" =~ ^http://127\.0\.0\.1:([0-9]{1,5})/v1/?$ ]]; then
+    port=${BASH_REMATCH[1]}
+    port_number=$((10#$port))
+    [ "$port_number" -ge 1 ] && [ "$port_number" -le 65535 ] || return 1
+    printf 'http://127.0.0.1:%s/healthz\n' "$port_number"
+    return 0
+  fi
+  return 1
+}
+
+codelaunch_codex_web_gpt_health_reachable() {
+  local health_url=$1 body
+  command -v curl >/dev/null 2>&1 || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  body=$(curl --connect-timeout 1 --max-time 2 -fsS "$health_url" 2>/dev/null) || return 1
+  printf '%s' "$body" | jq -e '.service == "codex-chatgpt-web" and .status == "ok"' >/dev/null 2>&1
+}
+
+codelaunch_codex_web_gpt_health_ok() {
+  local health_url=$1 body
+  command -v curl >/dev/null 2>&1 || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  body=$(curl --connect-timeout 1 --max-time 2 -fsS "$health_url" 2>/dev/null) || return 1
+  printf '%s' "$body" | jq -e '
+    .service == "codex-chatgpt-web" and
+    .status == "ok" and
+    .accepting_turns == true
+  ' >/dev/null 2>&1
+}
+
+codelaunch_codex_web_gpt_wait_health() {
+  local health_url=$1 attempts=${2:-60}
+  for _ in $(seq 1 "$attempts"); do
+    codelaunch_codex_web_gpt_health_ok "$health_url" && return 0
+    sleep 1
+  done
+  return 1
+}
+
+codelaunch_codex_web_gpt_doctor_ok() {
+  local cli=$1 output
+  CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL=''
+  if ! output=$("$cli" doctor --json 2>&1); then
+    CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL=$output
+    return 1
+  fi
+  if ! printf '%s' "$output" | jq -e '
+    type == "object" and
+    (.ok | type == "boolean") and
+    (.checks | type == "array") and
+    .ok == true
+  ' >/dev/null 2>&1; then
+    CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL='doctor reported an unhealthy or invalid runtime'
+    return 1
+  fi
+}
+
+codelaunch_codex_web_gpt_exact_command() {
+  local pid=$1 executable=$2 args
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  args=$(ps -ww -p "$pid" -o args= 2>/dev/null) || return 1
+  codelaunch_trim "$args"
+  args=$CODELAUNCH_VALUE
+  case "$args" in
+    "$executable"|"$executable --hidden"|"$executable -psn_"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+codelaunch_codex_web_gpt_pids() {
+  local app_path=$1 executable line pid args
+  executable="$app_path/Contents/MacOS/Codex Web GPT"
+  while IFS= read -r line; do
+    codelaunch_trim "$line"
+    line=$CODELAUNCH_VALUE
+    case "$line" in *' '*) ;; *) continue ;; esac
+    pid=${line%% *}
+    args=${line#* }
+    case "$args" in
+      "$executable"|"$executable --hidden"|"$executable -psn_"*) printf '%s\n' "$pid" ;;
+    esac
+  done < <(ps -ax -o pid=,args= 2>/dev/null)
+}
+
+codelaunch_codex_web_gpt_running_pid() {
+  local app_path=$1 pids
+  pids=$(codelaunch_codex_web_gpt_pids "$app_path")
+  set -- $pids
+  case "$#" in
+    0) return 1 ;;
+    1) printf '%s\n' "$1" ;;
+    *) return 2 ;;
+  esac
+}
+
+codelaunch_codex_web_gpt_start_identity() {
+  local pid=$1 identity
+  identity=$(LC_ALL=C TZ=UTC ps -p "$pid" -o lstart= 2>/dev/null | awk '{$1=$1; print}') || return 1
+  [ -n "$identity" ] || return 1
+  printf '%s\n' "$identity"
+}
+
+codelaunch_codex_web_gpt_pid_file() {
+  local root="$HOME/.codelaunch"
+  [ ! -L "$root" ] || return 2
+  [ ! -L "$root/run" ] || return 2
+  printf '%s/codex-web-gpt.pid\n' "$root/run"
+}
+
+codelaunch_codex_web_gpt_record_pid() {
+  local file record pid identity executable
+  CODELAUNCH_CODEX_WEB_GPT_PID=''
+  CODELAUNCH_CODEX_WEB_GPT_START_IDENTITY=''
+  CODELAUNCH_CODEX_WEB_GPT_EXECUTABLE=''
+  file=$(codelaunch_codex_web_gpt_pid_file) || return 2
+  [ -e "$file" ] || return 1
+  [ ! -L "$file" ] || return 2
+  [ -f "$file" ] || return 2
+  [ -s "$file" ] || return 1
+  record=$(awk 'NR == 1 { pid = $0; next } NR == 2 { identity = $0; next } NR == 3 { executable = $0; next } { bad = 1 } END { if (bad || pid !~ /^[0-9]+$/ || pid == 0 || identity == "" || executable == "") exit 1; print pid; print identity; print executable }' "$file") || return 2
+  pid=${record%%$'\n'*}
+  record=${record#*$'\n'}
+  identity=${record%%$'\n'*}
+  executable=${record#*$'\n'}
+  case "$executable" in
+    /*/Codex\ Web\ GPT.app/Contents/MacOS/Codex\ Web\ GPT) ;;
+    *) return 2 ;;
+  esac
+  printf -v CODELAUNCH_CODEX_WEB_GPT_PID '%s' "$pid"
+  printf -v CODELAUNCH_CODEX_WEB_GPT_START_IDENTITY '%s' "$identity"
+  printf -v CODELAUNCH_CODEX_WEB_GPT_EXECUTABLE '%s' "$executable"
+}
+
+codelaunch_codex_web_gpt_clear_record() {
+  local file
+  file=$(codelaunch_codex_web_gpt_pid_file) || return 2
+  [ ! -L "$file" ] || { echo "REFUSING: Codex Web GPT PID path is a symlink: $file" >&2; return 1; }
+  [ ! -e "$file" ] || : > "$file"
+  [ ! -e "$file" ] || chmod 600 "$file"
+}
+
+codelaunch_codex_web_gpt_record_matches() {
+  local pid=$1
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  codelaunch_codex_web_gpt_record_pid || return 1
+  [ "$CODELAUNCH_CODEX_WEB_GPT_PID" = "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  codelaunch_codex_web_gpt_exact_command "$pid" "$CODELAUNCH_CODEX_WEB_GPT_EXECUTABLE" || return 1
+  [ "$(codelaunch_codex_web_gpt_start_identity "$pid")" = "$CODELAUNCH_CODEX_WEB_GPT_START_IDENTITY" ]
+}
+
+codelaunch_codex_web_gpt_owned_pid() {
+  local pid rc
+  codelaunch_codex_web_gpt_record_pid
+  rc=$?
+  case "$rc" in
+    1) return 1 ;;
+    2) return 2 ;;
+  esac
+  pid=$CODELAUNCH_CODEX_WEB_GPT_PID
+  kill -0 "$pid" 2>/dev/null || return 2
+  if codelaunch_codex_web_gpt_record_matches "$pid"; then
+    printf '%s\n' "$pid"
+    return 0
+  fi
+  return 2
+}
+
+codelaunch_codex_web_gpt_write_pid() {
+  local pid=$1 executable=$2 file identity
+  codelaunch_prepare_runtime || return 2
+  file=$(codelaunch_codex_web_gpt_pid_file) || return 2
+  [ ! -L "$file" ] || { echo "REFUSING: Codex Web GPT PID path is a symlink: $file" >&2; return 1; }
+  codelaunch_codex_web_gpt_exact_command "$pid" "$executable" || return 1
+  identity=$(codelaunch_codex_web_gpt_start_identity "$pid") || return 1
+  printf '%s\n%s\n%s\n' "$pid" "$identity" "$executable" > "$file"
+  chmod 600 "$file"
 }
 
 codelaunch_caffeinate_pid_file() {

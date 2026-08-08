@@ -28,9 +28,14 @@ done
 
 # --- a. env (defaults if .env is gone) ---
 codelaunch_private_file .env
-codelaunch_load_env --optional T3_PORT TUNNEL_NAME
+codelaunch_load_env --optional T3_PORT CODEX_WEB_GPT_MANAGED TUNNEL_NAME
 : "${T3_PORT:=3773}"
+: "${CODEX_WEB_GPT_MANAGED:=0}"
 : "${TUNNEL_NAME:=t3-code}"
+case "$CODEX_WEB_GPT_MANAGED" in
+  0|1) ;;
+  *) echo "CODEX_WEB_GPT_MANAGED must be '0' or '1', got '$CODEX_WEB_GPT_MANAGED'"; exit 1 ;;
+esac
 
 # --- b. tunnel (SIGTERM, honor 30s grace, force with a second signal) ---
 tunnel_pids=$(codelaunch_tunnel_pids "$TUNNEL_NAME")
@@ -108,7 +113,151 @@ else
   echo "no claudex sessions running"
 fi
 
-# --- e. proxy (only if docker reachable) ---
+# --- e. Codex Web GPT (optional, same behavior with or without --all) ---
+stop_codex_web_gpt() {
+  [ "$CODEX_WEB_GPT_MANAGED" = 1 ] || return 0
+
+  local app_path='' cli health_url route_url owned_pid='' ownership_status=none running_pid='' running_status record_status
+  echo "disconnecting Codex Web GPT ..."
+
+  app_path=$(codelaunch_codex_web_gpt_app_path || true)
+  if ! cli=$(codelaunch_codex_web_gpt_cli "$app_path"); then
+    echo "WARNING: Codex Web GPT CLI is unavailable; leaving its route and launcher unchanged."
+    return 0
+  fi
+  if ! codelaunch_codex_web_gpt_read_route_status "$cli"; then
+    echo "WARNING: could not inspect the Codex Web GPT route; leaving its launcher running."
+    [ -z "$CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL" ] || echo "  $CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL"
+    return 0
+  fi
+  if [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_INSTALLED" != true ]; then
+    echo "WARNING: Codex Web GPT integration is not set up; nothing was disconnected or uninstalled."
+    return 0
+  fi
+  if [ -n "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_ERRORS" ]; then
+    echo "WARNING: Codex Web GPT route state is inconsistent; leaving its launcher running."
+    echo "  $CODELAUNCH_CODEX_WEB_GPT_ROUTE_ERRORS"
+    return 0
+  fi
+  if ! health_url=$(codelaunch_codex_web_gpt_health_url "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_URL"); then
+    echo "WARNING: Codex Web GPT reported a non-loopback or invalid route; leaving it unchanged."
+    return 0
+  fi
+  route_url=$CODELAUNCH_CODEX_WEB_GPT_ROUTE_URL
+
+  if [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_ACTIVE" = true ]; then
+    if ! codelaunch_codex_web_gpt_set_route "$cli" disconnect; then
+      echo "WARNING: Codex Web GPT route disconnect failed; leaving the launcher running so native Codex is not stranded on dead loopback."
+      [ -z "$CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL" ] || echo "  $CODELAUNCH_CODEX_WEB_GPT_STATUS_DETAIL"
+      return 0
+    fi
+  fi
+  if ! codelaunch_codex_web_gpt_read_route_status "$cli" \
+    || [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_INSTALLED" != true ] \
+    || [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_ACTIVE" != false ] \
+    || [ "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_URL" != "$route_url" ] \
+    || [ -n "$CODELAUNCH_CODEX_WEB_GPT_ROUTE_ERRORS" ]; then
+    echo "WARNING: Codex Web GPT route did not verify as disconnected; leaving the launcher running."
+    return 0
+  fi
+  echo "Codex Web GPT route disconnected; native Codex routing restored"
+
+  if [ -z "$app_path" ]; then
+    echo "Codex Web GPT app is not installed; route restoration is complete"
+    return 0
+  fi
+
+  if codelaunch_codex_web_gpt_record_pid; then
+    owned_pid=$CODELAUNCH_CODEX_WEB_GPT_PID
+    if kill -0 "$owned_pid" 2>/dev/null; then
+      if codelaunch_codex_web_gpt_record_matches "$owned_pid"; then
+        ownership_status=owned
+      else
+        echo "WARNING: Codex Web GPT ownership record no longer matches its live PID; leaving the launcher running."
+        return 0
+      fi
+    else
+      ownership_status=stale
+    fi
+  else
+    record_status=$?
+    if [ "$record_status" -eq 2 ]; then
+      echo "WARNING: invalid Codex Web GPT ownership record; leaving the launcher running."
+      return 0
+    fi
+  fi
+
+  if running_pid=$(codelaunch_codex_web_gpt_running_pid "$app_path"); then
+    if [ "$ownership_status" = stale ]; then
+      echo "WARNING: stale Codex Web GPT ownership record conflicts with a running launcher; leaving it up."
+      return 0
+    fi
+    if [ "$ownership_status" != owned ]; then
+      echo "Codex Web GPT launcher is running but was not started by CodeLaunch (PID $running_pid) - leaving it up"
+      return 0
+    fi
+    if [ "$owned_pid" != "$running_pid" ]; then
+      echo "WARNING: Codex Web GPT ownership does not match the running launcher; leaving it up."
+      return 0
+    fi
+  else
+    running_status=$?
+    if [ "$running_status" -eq 2 ]; then
+      echo "WARNING: multiple Codex Web GPT launcher processes found; leaving them unchanged."
+      return 0
+    fi
+    if [ "$ownership_status" = stale ]; then
+      if codelaunch_codex_web_gpt_health_reachable "$health_url"; then
+        echo "WARNING: recorded Codex Web GPT launcher is gone but its local runtime still answers; ownership retained."
+        return 0
+      fi
+      if codelaunch_codex_web_gpt_clear_record; then
+        echo "cleared stale Codex Web GPT ownership after confirming the launcher and runtime are gone"
+      else
+        echo "WARNING: stale Codex Web GPT ownership record could not be cleared"
+      fi
+      return 0
+    fi
+    echo "Codex Web GPT launcher is not running"
+    return 0
+  fi
+
+  if ! codelaunch_codex_web_gpt_record_matches "$owned_pid"; then
+    echo "WARNING: Codex Web GPT ownership changed before quit; leaving the launcher running."
+    return 0
+  fi
+  echo "quitting CodeLaunch-owned Codex Web GPT (PID $owned_pid) ..."
+  if ! /usr/bin/osascript -e 'tell application id "dev.codexwebgpt.launcher" to quit'; then
+    echo "WARNING: Codex Web GPT did not accept the application quit request; ownership retained for retry."
+    return 0
+  fi
+
+  for _ in $(seq 1 60); do
+    if ! kill -0 "$owned_pid" 2>/dev/null; then break; fi
+    if ! codelaunch_codex_web_gpt_record_matches "$owned_pid"; then
+      echo "WARNING: Codex Web GPT PID identity changed during shutdown; ownership retained and no signal was sent."
+      return 0
+    fi
+    sleep 1
+  done
+  if kill -0 "$owned_pid" 2>/dev/null; then
+    echo "WARNING: Codex Web GPT is still running after 60s; it may be draining active work."
+    echo "  No force kill was attempted. Ownership is retained for a later ./stop.sh retry."
+    return 0
+  fi
+  if codelaunch_codex_web_gpt_health_reachable "$health_url"; then
+    echo "WARNING: Codex Web GPT launcher exited but its local runtime is still healthy; ownership retained for investigation."
+    return 0
+  fi
+  if codelaunch_codex_web_gpt_clear_record; then
+    echo "CodeLaunch-owned Codex Web GPT quit cleanly"
+  else
+    echo "WARNING: Codex Web GPT quit, but its ownership record could not be cleared"
+  fi
+}
+stop_codex_web_gpt
+
+# --- f. proxy (only if docker reachable) ---
 if docker info >/dev/null 2>&1; then
   echo "stopping proxy ..."
   ./cliproxy/stop.sh || true
@@ -117,7 +266,7 @@ else
 fi
 
 if [ "$ALL" = 1 ]; then
-  # --- f. Docker Desktop (guarded, nonfatal) ---
+  # --- g. Docker Desktop (guarded, nonfatal) ---
   if command -v docker >/dev/null 2>&1 && docker desktop --help >/dev/null 2>&1; then
     echo "stopping Docker Desktop ..."
     docker desktop stop || echo "WARNING: Docker Desktop stop failed; leaving it running"
@@ -125,7 +274,7 @@ if [ "$ALL" = 1 ]; then
     echo "WARNING: Docker Desktop CLI unavailable; leaving it running"
   fi
 
-  # --- g. CodeLaunch-owned caffeinate only ---
+  # --- h. CodeLaunch-owned caffeinate only ---
   # start.sh reuses a pre-existing caffeinate without claiming it, so anything we did not record stays up.
   caffeinate_pid=''
   caffeinate_left=''
@@ -174,7 +323,7 @@ if [ "$ALL" = 1 ]; then
   [ -z "$caffeinate_left" ] || remaining="$remaining, plus caffeinate ($caffeinate_left)"
   echo "$remaining remain running"
 else
-  # --- f. left running on purpose ---
+  # --- g. left running on purpose ---
   echo "left running: Docker Desktop + daemon, native Claude Code sessions, caffeinate, T3 Connect relays"
   echo "Use ./stop.sh --all to also stop Docker Desktop and CodeLaunch-owned caffeinate."
 fi

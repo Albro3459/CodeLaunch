@@ -52,14 +52,16 @@ stable shim and document that prerequisite.
 
 ## Known gaps (found after implementation, not yet fixed)
 
-- [ ] CLI resolution does not match how the launcher ships on macOS.
+- [x] CLI resolution did not match how the launcher ships on macOS.
   `install-launcher.sh` places only `Codex Web GPT.app`; the `~/.local/bin`
   wrapper it writes is the Linux branch and is the launcher, not the CLI. The
   bundle has no `Contents/Resources/runtime/bin/codex-chatgpt-web`, so that
-  fallback in `codelaunch_codex_web_gpt_cli` is dead. The only copy is
-  `~/.codex-chatgpt-web/versions/<version>-darwin-arm64/bin/codex-chatgpt-web`.
-  Resolve it from `~/.codex-chatgpt-web` using the live release in `config.json`,
-  then drop the manual symlink from `SETUP.md` 6B and `QUICK-SETUP.md`.
+  fallback in `codelaunch_codex_web_gpt_cli` was dead. Fixed with
+  `codelaunch_codex_web_gpt_runtime_cli`, which reads `releaseVersion` from
+  `$CODEX_CHATGPT_WEB_HOME`/`~/.codex-chatgpt-web/config.json` and resolves
+  `versions/<version>-darwin-<arch>/bin/codex-chatgpt-web`, so launcher updates
+  are picked up without touching PATH. An on-PATH CLI still wins if present. No
+  manual symlink is needed and the docs no longer ask for one.
 - [ ] `codelaunch_codex_web_gpt_app_path` stalls when the launcher is not
   running. `osascript -e 'POSIX path of (path to application id ...)'` sends an
   AppleEvent to the target; with the app installed but stopped it ran for over a

@@ -70,12 +70,8 @@ curl -fsSL https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/
 ```
 
 Quit the app first when updating - the script will not overwrite a running launcher.
-Then finish setup in the app, and link its CLI so CodeLaunch can drive it:
-
-```bash
-ln -sfn "$HOME/.codex-chatgpt-web/versions/2.0.0-darwin-arm64/bin/codex-chatgpt-web" \
-  ~/.local/bin/codex-chatgpt-web
-```
+Then finish setup in the app. Nothing goes on your PATH; CodeLaunch finds the CLI
+itself and keeps finding it across updates.
 
 Set `CODEX_WEB_GPT_MANAGED=1` in `.env`. After that, `start.sh` points Codex at the
 launcher and opens it hidden if it is not already running; `stop.sh` points Codex back
@@ -83,8 +79,7 @@ and quits the launcher only if it started it. Turn off **Launch at login** in th
 if you want `start.sh` to own that.
 
 If the app is missing or its setup is incomplete, both scripts print a warning and
-carry on. Redo the link after a launcher update - it points at one version.
-[More](SETUP.md#step-6---codex-web-gpt-optional).
+carry on. [More](SETUP.md#step-6---codex-web-gpt-optional).
 
 ## Useful
 

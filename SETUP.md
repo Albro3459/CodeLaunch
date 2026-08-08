@@ -876,32 +876,17 @@ codex-chatgpt-web route status
 recorded, so it can be restored. `active` means Codex is pointed at the loopback
 daemon right now. `errors` must be empty.
 
-### 6B. Put the CLI on PATH (CodeLaunch only)
+There is nothing to add to your PATH. The macOS installer places only the app
+bundle, and the CLI is not inside it - the only copy lives in the private runtime
+directory the launcher provisions per release. `codelaunch_codex_web_gpt_cli`
+prefers a `codex-chatgpt-web` on PATH if you happen to have one, and otherwise
+reads `releaseVersion` from `~/.codex-chatgpt-web/config.json` and resolves
+`versions/<version>-darwin-<arch>/bin/codex-chatgpt-web` from it. Keying off the
+live release matters because updates leave the older version directories on disk,
+and a hard-coded or symlinked path would keep running a stale CLI against new
+config. Set `CODEX_CHATGPT_WEB_HOME` if you moved that directory.
 
-The launcher itself never needs a CLI on PATH - it drives its own runtime
-directly. CodeLaunch does, because the whole lifecycle here is built on
-`codex-chatgpt-web route status|connect|disconnect` and `doctor --json`. The
-macOS installer only places the app bundle, and the CLI is not inside it. The
-only copy is in the private runtime directory the app provisions for the release
-it is running:
-
-```bash
-ln -sfn "$HOME/.codex-chatgpt-web/versions/2.0.0-darwin-arm64/bin/codex-chatgpt-web" \
-  ~/.local/bin/codex-chatgpt-web
-```
-
-The shim resolves symlinks to locate its own runtime, so linking it works. The
-path is version-specific, so **re-point it after a launcher update** - the old
-version directory stays on disk and a stale link keeps working against the wrong
-release. Without the link `start.sh` prints one warning and skips the whole
-phase; nothing else is affected.
-
-This step exists because `scripts/env.sh` resolves the CLI from PATH, with a
-fallback into the app bundle that no longer matches how the launcher ships. See
-[TODO/CODEX-WEB-GPT-LIFECYCLE.md](TODO/CODEX-WEB-GPT-LIFECYCLE.md); once the CLI
-is resolved from `~/.codex-chatgpt-web` directly, this section goes away.
-
-### 6C. Enable it
+### 6B. Enable it
 
 ```bash
 CODEX_WEB_GPT_MANAGED=1
@@ -910,14 +895,14 @@ CODEX_WEB_GPT_MANAGED=1
 Accepted values are `0` and `1`; anything else fails `start.sh` and `stop.sh`
 immediately. At `0` neither script looks at Codex Web GPT at all.
 
-### 6D. What start and stop actually do
+### 6C. What start and stop actually do
 
 `start.sh` runs this after the proxy and before the T3 backend, so a new Codex
 session sees the intended route and model list. Every failure below is a warning
 that does not stop the rest of the stack:
 
-1. Resolve the app by bundle id and the CLI on PATH. Missing either one warns
-   and returns.
+1. Resolve the app by bundle id, and the CLI from PATH or the live release in
+   `config.json`. Missing either one warns and returns.
 2. Read `route status`. It requires `installed: true`, no `errors`, and a
    loopback `routeUrl` of the exact form `http://127.0.0.1:<port>/v1`. A
    non-loopback or unparseable route is refused rather than guessed at. The port
@@ -967,7 +952,7 @@ behaves identically with and without `--all`:
 Neither script ever runs `codex-chatgpt-web uninstall`, including under `--all`.
 Removing the integration stays a manual choice, made in the launcher.
 
-### 6E. Models in T3
+### 6D. Models in T3
 
 Enable the `codex` provider in T3 (`.t3/example.settings.json` ships it enabled
 with `binaryPath: "codex"`). While the route is connected the provider lists the
@@ -981,7 +966,7 @@ windows scale with effort, from 150k up to 272k.
 is the whole point of the route being reversible, and it is why `stop.sh`
 disconnects before it quits anything.
 
-### 6F. Private state
+### 6E. Private state
 
 `~/.codex-chatgpt-web` holds authentication, runtime, and integration state:
 `config.json` (which contains a plaintext `controlToken` for the daemon's admin

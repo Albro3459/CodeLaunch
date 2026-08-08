@@ -60,6 +60,32 @@ actually worked this boot. The second check exists because `t3 connect status` o
 reads local files, so it keeps reporting success long after the credential stopped
 working.
 
+## Codex Web GPT
+
+Off by default. Adds the `chatgpt-web/*` models to the Codex provider in T3, on top
+of the normal Codex ones. Install or update the launcher with:
+
+```bash
+curl -fsSL https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/install-launcher.sh | sh
+```
+
+Quit the app first when updating - the script will not overwrite a running launcher.
+Then finish setup in the app, and link its CLI so CodeLaunch can drive it:
+
+```bash
+ln -sfn "$HOME/.codex-chatgpt-web/versions/2.0.0-darwin-arm64/bin/codex-chatgpt-web" \
+  ~/.local/bin/codex-chatgpt-web
+```
+
+Set `CODEX_WEB_GPT_MANAGED=1` in `.env`. After that, `start.sh` points Codex at the
+launcher and opens it hidden if it is not already running; `stop.sh` points Codex back
+and quits the launcher only if it started it. Turn off **Launch at login** in the app
+if you want `start.sh` to own that.
+
+If the app is missing or its setup is incomplete, both scripts print a warning and
+carry on. Redo the link after a launcher update - it points at one version.
+[More](SETUP.md#step-6---codex-web-gpt-optional).
+
 ## Useful
 
 ```bash

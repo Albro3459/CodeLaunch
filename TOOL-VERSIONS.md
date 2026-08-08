@@ -10,8 +10,10 @@ As tested and working together, recorded 2026-07-22.
 | CLIProxyAPI | v7.2.92, commit 53c1e7e, built 2026-07-20 (pinned by digest `sha256:af18f6fb364bfb7b482a1ca6c6c85fd7df2c0d6a3a497ebb82c337ac2216dc41`) |
 | cloudflared | 2026.7.2 (built 2026-07-15) |
 | Claude Code | 2.1.217 |
-| T3 Code Desktop | 0.0.29-nightly.20260721.864 (`T3 Code (Nightly).app`, cask `t3-code@nightly`) |
-| t3 CLI (`npx t3@$T3_CHANNEL`) | 0.0.28 (`latest`) / 0.0.29-nightly.20260722.877 (`nightly`) |
+| Codex Web GPT | 2.0.0 (`/Applications/Codex Web GPT.app`, bundle id `dev.codexwebgpt.launcher`; recorded 2026-08-07) |
+| Codex CLI | 0.147.0 (`codex-cli`, on PATH; recorded 2026-08-07) |
+| T3 Code Desktop | 0.0.32 (`T3 Code (Alpha).app`, cask `t3-code`; recorded 2026-08-07) |
+| t3 CLI (`npx t3@$T3_CHANNEL`) | 0.0.32 (`latest`) / 0.0.33-nightly.20260808.1029 (`nightly`) |
 | Node | v24.18.0 |
 | npm | 11.16.0 |
 | jq | 1.8.1 |
@@ -26,6 +28,9 @@ Notes:
   recorded.
 - The `t3-code` cask auto-updates. Re-record its version (and re-check the
   backend port/binding) after updates.
+- Codex Web GPT keeps its runtime outside the app bundle, one directory per
+  release under `~/.codex-chatgpt-web/versions/<version>-darwin-arm64/`. Only the release matching
+  `config.json` is live.
 - CLIProxyAPI is pinned by digest in `cliproxy/docker-compose.yml` since tags
   are mutable and could change routing behavior on a pull. To move: pull the
   new image, re-verify `/v1/models` and effort, update the digest and version

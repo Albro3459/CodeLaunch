@@ -6,6 +6,8 @@ Tested on an ARM Mac (macOS 26.x), working end to end from off-network devices, 
 
 Browsers connect through Cloudflare Access. The mobile app pairs over a trusted LAN or VPN with `T3_BIND=all`; see [SETUP.md](SETUP.md#4e-direct-lanvpn-pairing-required-for-the-mobile-app).
 
+Codex runs through the normal Codex provider in T3. Set `CODEX_WEB_GPT_MANAGED=1` in `.env` to also get the `chatgpt-web/*` models from the Codex Web GPT launcher: `start.sh` switches Codex over to it, `stop.sh` switches it back. Off by default; see [SETUP.md](SETUP.md#step-6---codex-web-gpt-optional).
+
 ## Screenshots + Remote Control Demo
 
 #### Claude and Codex Subscriptions

@@ -266,11 +266,18 @@ literal placeholder `/Users/<username>/.local/bin/claudex`. Left as-is, T3 fails
 with `spawn ... ENOENT` for the absolute-path reason above. Replace it with the
 real path.
 
+The template also enables the stock `codex` provider with `binaryPath: "codex"`,
+which is what [Step 6](#step-6---codex-web-gpt-optional) needs. It costs nothing
+if you never turn Codex Web GPT on - the provider just lists the native Codex
+models.
+
 `example.client-settings.json` carries picker state rather than provider config:
 favorites for `claudeAgent` and `claudex` on `claude-fable-5` and
-`claude-opus-5`, plus `providerModelPreferences.claudex.hiddenModels`, which
-hides `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5`
-and `claude-sonnet-4-6` from the claudex picker.
+`claude-opus-5`, one `codex` favorite on `chatgpt-web/high` (which only appears
+while the Codex Web GPT route is connected), plus
+`providerModelPreferences.claudex.hiddenModels`, which hides `claude-opus-4-8`,
+`claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5` and `claude-sonnet-4-6`
+from the claudex picker.
 
 The Opus 5 row needs Claude Code >= 2.1.219; below that T3 filters it out of the
 picker entirely and shows an upgrade message instead.
@@ -760,24 +767,30 @@ uses detached behavior automatically:
 5. **cliproxy** - `./cliproxy/start.sh`, then an authenticated
    `curl /v1/models` with the key grepped from `config.yaml`. A rejected key
    fails loudly.
-6. **backend** - `./t3-pair.sh --ensure-only` reuses or starts the T3 backend and
+6. **Codex Web GPT** - a no-op unless `CODEX_WEB_GPT_MANAGED=1`. Connects the
+   reversible Codex route, opens the launcher hidden if it is not already up, and
+   waits for its loopback daemon to report healthy. It runs before the backend so
+   new Codex sessions see the intended route and model list. Every failure is a
+   warning, never fatal. See
+   [Step 6](#step-6---codex-web-gpt-optional).
+7. **backend** - `./t3-pair.sh --ensure-only` reuses or starts the T3 backend and
    verifies its live bind matches `T3_BIND`. `--ensure-only` and
    `--check-only` are noninteractive checks; they do not mint a token or open the
    pairing helper.
-7. **tunnel** - reuse the named `$TUNNEL_NAME` process if it is already up, else
+8. **tunnel** - reuse the named `$TUNNEL_NAME` process if it is already up, else
    launch it
    to `$HOME/.codelaunch/run/cloudflared-t3.log` and poll for `Registered tunnel
    connection` (up to 30s, printing `tail -20` on timeout). Reused processes keep
    their existing log destination until restarted.
-8. **publishing health** - `./t3-publish.sh --verify-only`, a no-op unless
+9. **publishing health** - `./t3-publish.sh --verify-only`, a no-op unless
    `T3_PUBLISH_ACTIVITY=1`. It runs after the tunnel so the backend's link reconcile
    has had that time to land, then reads `t3-serve.log` for the result and reports
    any publishes that failed since boot. See
    [4F](#4f-publishing-agent-activity-push-notifications) for why this is separate
    from the `--check-only` pass.
-9. **pairing token** - `./t3-pair.sh [--detached] [ttl]` rechecks the backend
-   and mints the one-time token only after the tunnel is ready. `start.sh` passes
-   the TTL and detached choice through; it does not mint a second token.
+10. **pairing token** - `./t3-pair.sh [--detached] [ttl]` rechecks the backend
+    and mints the one-time token only after the tunnel is ready. `start.sh` passes
+    the TTL and detached choice through; it does not mint a second token.
 
 `./stop.sh` reverses the stack and leaves **Docker Desktop, the Docker daemon,
 native Claude Code, and `caffeinate -dims`** running on purpose. It prints a
@@ -793,6 +806,12 @@ reminder to use `./stop.sh --all` for the optional full shutdown:
 - **claudex sessions** - matched by the literal `CLAUDE_CONFIG_DIR=$HOME/.claudex`
   in the process **environment** (`ps eww` appends env vars). Native Claude Code
   lacks that marker, so it is never touched. SIGTERM only.
+- **Codex Web GPT** - a no-op unless `CODEX_WEB_GPT_MANAGED=1`. Disconnects the
+  Codex route and restores the prior native one, then quits the launcher only if
+  CodeLaunch started it and it still matches on PID, executable path, and start
+  time. A launcher it did not start is left running. It never force-kills and
+  never uninstalls, with or without `--all`. See
+  [Step 6](#step-6---codex-web-gpt-optional).
 - **cliproxy** - `./cliproxy/stop.sh` (`docker compose down`), skipped with a
   note if docker is unreachable.
 - **caffeinate** - normal stop leaves it running so a remote stop does not release
@@ -806,3 +825,167 @@ It never stops native Claude Code, T3 Connect or unrelated tunnels, unrelated
 Docker containers, or unowned `caffeinate` processes.
 
 Every kill is guarded with `|| true` so re-runs are clean no-ops.
+
+## Step 6 - Codex Web GPT (optional)
+
+Optional, off by default, and independent of the tunnel and the proxy. Codex Web
+GPT is a separate macOS launcher that runs a loopback Responses daemon and
+points the Codex CLI at it, which adds
+`chatgpt-web/*` models to the normal `codex` provider in T3. CodeLaunch does not
+install or configure it - the launcher owns its own setup, its Bun runtime, its
+browser helper, and its tunnel. CodeLaunch only flips the reversible Codex route
+on start and back off on stop, and quits a launcher it started itself.
+
+### 6A. Install the launcher
+
+The same script installs and updates it:
+
+```bash
+curl -fsSL https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/install-launcher.sh | sh
+```
+
+It resolves the latest release, verifies the asset against `checksums.txt` with
+SHA-256, installs `Codex Web GPT.app` into `/Applications` (falling back to
+`~/Applications` if that is not writable), and opens it. On an update it moves the
+old bundle aside and rolls back if the copy fails. **It refuses to run while the
+launcher is open**, so quit the app - or run `./stop.sh` if CodeLaunch owns it -
+before updating.
+
+Then complete setup in the GUI. CodeLaunch never runs `setup` or `uninstall` on
+your behalf.
+
+- **Disable "Launch at login"** if CodeLaunch should own app startup. Left on,
+  macOS starts the launcher before `start.sh` runs, so CodeLaunch reuses it as
+  an unowned process and `stop.sh` leaves it running - which is correct, just not
+  what you asked for.
+- **"Keep server running when window closes" may stay enabled.** CodeLaunch
+  quits the *application*, not the window, so that setting does not block
+  shutdown.
+
+Verify the integration exists before enabling anything:
+
+```bash
+codex-chatgpt-web route status
+```
+
+```json
+{ "installed": true, "active": true, "routeUrl": "http://127.0.0.1:17841/v1", "errors": [] }
+```
+
+`installed` means the reversible journal is written and the prior Codex route was
+recorded, so it can be restored. `active` means Codex is pointed at the loopback
+daemon right now. `errors` must be empty.
+
+### 6B. Put the CLI on PATH (CodeLaunch only)
+
+The launcher itself never needs a CLI on PATH - it drives its own runtime
+directly. CodeLaunch does, because the whole lifecycle here is built on
+`codex-chatgpt-web route status|connect|disconnect` and `doctor --json`. The
+macOS installer only places the app bundle, and the CLI is not inside it. The
+only copy is in the private runtime directory the app provisions for the release
+it is running:
+
+```bash
+ln -sfn "$HOME/.codex-chatgpt-web/versions/2.0.0-darwin-arm64/bin/codex-chatgpt-web" \
+  ~/.local/bin/codex-chatgpt-web
+```
+
+The shim resolves symlinks to locate its own runtime, so linking it works. The
+path is version-specific, so **re-point it after a launcher update** - the old
+version directory stays on disk and a stale link keeps working against the wrong
+release. Without the link `start.sh` prints one warning and skips the whole
+phase; nothing else is affected.
+
+This step exists because `scripts/env.sh` resolves the CLI from PATH, with a
+fallback into the app bundle that no longer matches how the launcher ships. See
+[TODO/CODEX-WEB-GPT-LIFECYCLE.md](TODO/CODEX-WEB-GPT-LIFECYCLE.md); once the CLI
+is resolved from `~/.codex-chatgpt-web` directly, this section goes away.
+
+### 6C. Enable it
+
+```bash
+CODEX_WEB_GPT_MANAGED=1
+```
+
+Accepted values are `0` and `1`; anything else fails `start.sh` and `stop.sh`
+immediately. At `0` neither script looks at Codex Web GPT at all.
+
+### 6D. What start and stop actually do
+
+`start.sh` runs this after the proxy and before the T3 backend, so a new Codex
+session sees the intended route and model list. Every failure below is a warning
+that does not stop the rest of the stack:
+
+1. Resolve the app by bundle id and the CLI on PATH. Missing either one warns
+   and returns.
+2. Read `route status`. It requires `installed: true`, no `errors`, and a
+   loopback `routeUrl` of the exact form `http://127.0.0.1:<port>/v1`. A
+   non-loopback or unparseable route is refused rather than guessed at. The port
+   comes from that value; `17841` is not hard-coded.
+3. Find the launcher by exact executable path. Already running means reuse it
+   **without** recording ownership, so `stop.sh` will leave it alone.
+4. If the route is inactive, `route connect`, then re-read `route status` and
+   require the same route back. This runs **before** the launcher is opened: the
+   launcher starts its supervised runtime at process startup only when the route
+   is already active, so connecting afterwards would never bring a stopped
+   runtime up.
+5. If no launcher is running, `open -g -j` the app hidden, resolve its PID, and
+   verify PID, executable path, and process start time before writing the
+   ownership record to `~/.codelaunch/run/codex-web-gpt.pid`.
+6. Poll `http://127.0.0.1:<port>/healthz` for up to 60s and require
+   `service: "codex-chatgpt-web"`, `status: "ok"`, and `accepting_turns: true`.
+   Then `doctor --json` must report `ok: true`, and `route status` must still
+   agree.
+
+If any step after the connect fails and CodeLaunch is the one that connected the
+route or opened the launcher, it runs `route disconnect` to put native Codex
+back rather than leaving it pointed at a daemon that is not answering.
+
+`stop.sh` runs after the claudex sessions are stopped and before the proxy, and
+behaves identically with and without `--all`:
+
+- Read `route status`, then `route disconnect` if it is active, then verify that
+  the journal is still `installed`, the route is `active: false`, the same
+  `routeUrl` is recorded, and `errors` is empty.
+- **A failed disconnect leaves the launcher running.** Quitting it while Codex
+  still points at its loopback daemon would break native Codex too, so it reports
+  and moves on to the rest of the teardown.
+- Only after a verified disconnect does it look at ownership. A launcher recorded
+  as CodeLaunch-owned, still alive, and still matching on PID, executable path,
+  and start time gets a normal application quit:
+  `osascript -e 'tell application id "dev.codexwebgpt.launcher" to quit'`.
+  A launcher it did not start is left running and reported. A stale, malformed,
+  symlinked, or mismatched record fails closed - the app is left running and
+  nothing is signalled.
+- It waits up to 60s for the app to drain and exit, rechecking identity each
+  second. There is no escalation: no `kill`, no `kill -9`, no `pkill`, no Bun
+  signal, no touching the browser helper or tunnel. A launcher still up after
+  60s is reported as busy and its ownership record is kept for a later retry.
+- Ownership is cleared only after the exact process is gone **and** `/healthz`
+  has stopped answering.
+
+Neither script ever runs `codex-chatgpt-web uninstall`, including under `--all`.
+Removing the integration stays a manual choice, made in the launcher.
+
+### 6E. Models in T3
+
+Enable the `codex` provider in T3 (`.t3/example.settings.json` ships it enabled
+with `binaryPath: "codex"`). While the route is connected the provider lists the
+native Codex models plus five web-backed rows: `chatgpt-web/light`,
+`chatgpt-web/medium`, `chatgpt-web/high`, `chatgpt-web/extra-high`, and
+`chatgpt-web/pro`. The last two are account-gated and only appear when the
+launcher reports Pro; `chatgpt-web/pro` also has no local tool calls. Context
+windows scale with effort, from 150k up to 272k.
+
+**While connected, native Codex models go through the loopback daemon too.** That
+is the whole point of the route being reversible, and it is why `stop.sh`
+disconnects before it quits anything.
+
+### 6F. Private state
+
+`~/.codex-chatgpt-web` holds authentication, runtime, and integration state:
+`config.json` (which contains a plaintext `controlToken` for the daemon's admin
+endpoints), `secrets/` (the tunnel runtime key), the saved ChatGPT browser
+session, the tunnel profile, and the reversible route journal. It is outside this
+repo and must never be committed, copied into `.t3/`, or pasted into an issue.
+Back it up the way you would an SSH key, or not at all.

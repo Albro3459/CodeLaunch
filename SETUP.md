@@ -188,6 +188,34 @@ you're running the nightly cask (`t3-code@nightly`).
 
 Configure two providers in T3 Desktop.
 
+### Codex process ownership
+
+The example settings enable the native Codex provider with
+`providerInstances.codex.enabled=true`, `config.enabled=true`, and
+`binaryPath: "codex"`. Choose one Codex mode at a time:
+
+- For normal/native Codex models through T3 Code and CodeLaunch, the **ChatGPT**
+  desktop app must be quit. T3 uses the Codex app server and must own the
+  `codex` processes; the ChatGPT app conflicts with that ownership. CodeLaunch
+  checks this during `start.sh` and warns without quitting the app. Quit it
+  gracefully with:
+
+  ```bash
+  osascript -e 'tell application "ChatGPT" to quit'
+  ```
+
+  A process diagnostic is:
+
+  ```bash
+  ps -ax -o pid,ppid,command | grep -E 'ChatGPT.app./codex|codex-code-mode-host'
+  ```
+
+- `CODEX_WEB_GPT_MANAGED=1` selects the Web GPT integration instead. The
+  service may be started headlessly by CodeLaunch, but it requires the ChatGPT
+  desktop app and is not usable as a T3 Code/CodeLaunch provider: Web GPT
+  models cannot make tool calls there. Keep `CODEX_WEB_GPT_MANAGED=0` for the
+  native T3 Codex provider.
+
 **Claude Native** - leave as installed. T3 resolves the bare `claude` name on
 its own.
 
@@ -273,8 +301,7 @@ models.
 
 `example.client-settings.json` carries picker state rather than provider config:
 favorites for `claudeAgent` and `claudex` on `claude-fable-5` and
-`claude-opus-5`, one `codex` favorite on `chatgpt-web/high` (which only appears
-while the Codex Web GPT route is connected), plus
+`claude-opus-5`, and one native `codex` favorite on `gpt-5.6-sol`, plus
 `providerModelPreferences.claudex.hiddenModels`, which hides `claude-opus-4-8`,
 `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5` and `claude-sonnet-4-6`
 from the claudex picker.
@@ -767,11 +794,13 @@ uses detached behavior automatically:
 5. **cliproxy** - `./cliproxy/start.sh`, then an authenticated
    `curl /v1/models` with the key grepped from `config.yaml`. A rejected key
    fails loudly.
-6. **Codex Web GPT** - a no-op unless `CODEX_WEB_GPT_MANAGED=1`. Connects the
-   reversible Codex route, opens the launcher hidden if it is not already up, and
-   waits for its loopback daemon to report healthy. It runs before the backend so
-   new Codex sessions see the intended route and model list. Every failure is a
-   warning, never fatal. See
+6. **Codex Web GPT** - a no-op unless `CODEX_WEB_GPT_MANAGED=1`. Requires the
+   ChatGPT desktop app to be running, then connects the reversible route, starts
+   the Web GPT service headlessly if needed, and waits for its loopback daemon
+   to report healthy. It runs before the backend. This is a ChatGPT desktop
+   integration; Web GPT models are not usable inside T3 Code/CodeLaunch and
+   cannot make tool calls there. A desktop-mode mismatch stops startup; later
+   launcher and route failures remain nonfatal warnings. See
    [Step 6](#step-6---codex-web-gpt-optional).
 7. **backend** - `./t3-pair.sh --ensure-only` reuses or starts the T3 backend and
    verifies its live bind matches `T3_BIND`. `--ensure-only` and
@@ -829,12 +858,14 @@ Every kill is guarded with `|| true` so re-runs are clean no-ops.
 ## Step 6 - Codex Web GPT (optional)
 
 Optional, off by default, and independent of the tunnel and the proxy. Codex Web
-GPT is a separate macOS launcher that runs a loopback Responses daemon and
-points the Codex CLI at it, which adds
-`chatgpt-web/*` models to the normal `codex` provider in T3. CodeLaunch does not
-install or configure it - the launcher owns its own setup, its Bun runtime, its
-browser helper, and its tunnel. CodeLaunch only flips the reversible Codex route
-on start and back off on stop, and quits a launcher it started itself.
+GPT is a separate macOS launcher that runs a loopback Responses daemon for the
+**ChatGPT** desktop integration. CodeLaunch can start that service headlessly,
+but the ChatGPT desktop app is required for the Web GPT models to work. They are
+not a usable provider inside T3 Code/CodeLaunch and cannot make tool calls there.
+CodeLaunch does not install or configure the integration - the launcher owns its
+own setup, its Bun runtime, its browser helper, and its tunnel. CodeLaunch only
+flips the reversible route on start and back off on stop, and quits a launcher it
+started itself.
 
 ### 6A. Install the launcher
 
@@ -897,9 +928,11 @@ immediately. At `0` neither script looks at Codex Web GPT at all.
 
 ### 6C. What start and stop actually do
 
-`start.sh` runs this after the proxy and before the T3 backend, so a new Codex
-session sees the intended route and model list. Every failure below is a warning
-that does not stop the rest of the stack:
+Before starting any services, `start.sh` requires the ChatGPT desktop app to be
+running for this mode. It shows both a terminal warning and a macOS alert, then
+stops without starting or quitting ChatGPT if the app is absent. After that
+preflight passes, the Web GPT setup runs after the proxy and before the T3
+backend. Failures in the setup steps below are nonfatal warnings:
 
 1. Resolve the app and the CLI. The app is looked for in
    `$CODEX_WEB_GPT_APPLICATIONS_DIR`, `/Applications`, and `~/Applications`, then
@@ -956,19 +989,17 @@ behaves identically with and without `--all`:
 Neither script ever runs `codex-chatgpt-web uninstall`, including under `--all`.
 Removing the integration stays a manual choice, made in the launcher.
 
-### 6D. Models in T3
+### 6D. Models and tool calls
 
-Enable the `codex` provider in T3 (`.t3/example.settings.json` ships it enabled
-with `binaryPath: "codex"`). While the route is connected the provider lists the
-native Codex models plus five web-backed rows: `chatgpt-web/light`,
-`chatgpt-web/medium`, `chatgpt-web/high`, `chatgpt-web/extra-high`, and
-`chatgpt-web/pro`. The last two are account-gated and only appear when the
-launcher reports Pro; `chatgpt-web/pro` also has no local tool calls. Context
-windows scale with effort, from 150k up to 272k.
+Enable the native `codex` provider in T3 (`.t3/example.settings.json` ships it
+enabled with `binaryPath: "codex"`) and leave `CODEX_WEB_GPT_MANAGED=0`. In this
+mode, quit ChatGPT before starting so T3 owns the Codex app-server processes.
 
-**While connected, native Codex models go through the loopback daemon too.** That
-is the whole point of the route being reversible, and it is why `stop.sh`
-disconnects before it quits anything.
+When `CODEX_WEB_GPT_MANAGED=1`, CodeLaunch may start the Web GPT service
+headlessly, but that mode is for the ChatGPT desktop integration. The ChatGPT
+desktop app must be running, and Web GPT is not supported as a provider inside
+T3 Code/CodeLaunch; its models cannot make tool calls there. Do not select the
+`chatgpt-web/*` rows in T3 expecting them to work.
 
 ### 6E. Private state
 

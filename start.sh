@@ -48,6 +48,7 @@ case "$CODEX_WEB_GPT_MANAGED" in
   0|1) ;;
   *) echo "CODEX_WEB_GPT_MANAGED must be '0' or '1', got '$CODEX_WEB_GPT_MANAGED'"; exit 1 ;;
 esac
+codelaunch_codex_desktop_preflight "$CODEX_WEB_GPT_MANAGED" || exit 1
 if [ "$T3_BIND" = all ]; then
   echo "WARNING: T3_BIND=all exposes :$T3_PORT to your LAN/VPN; pairing code only"
 fi

@@ -6,7 +6,22 @@ Tested on an ARM Mac (macOS 26.x), working end to end from off-network devices, 
 
 Browsers connect through Cloudflare Access. The mobile app pairs over a trusted LAN or VPN with `T3_BIND=all`; see [SETUP.md](SETUP.md#4e-direct-lanvpn-pairing-required-for-the-mobile-app).
 
-Codex runs through the normal Codex provider in T3. Set `CODEX_WEB_GPT_MANAGED=1` in `.env` to also get the `chatgpt-web/*` models from the Codex Web GPT launcher: `start.sh` switches Codex over to it, `stop.sh` switches it back. Off by default; see [SETUP.md](SETUP.md#step-6---codex-web-gpt-optional).
+The example T3 settings enable the native `codex` provider. For normal Codex
+models in T3 Code, quit the **ChatGPT** desktop app first: T3 owns the Codex
+app-server processes, and the desktop app conflicts with that ownership. If
+ChatGPT is still running, CodeLaunch warns and shows the graceful quit command
+instead of quitting it for you:
+
+```bash
+osascript -e 'tell application "ChatGPT" to quit'
+```
+
+`CODEX_WEB_GPT_MANAGED=1` is a separate ChatGPT desktop integration. CodeLaunch
+can start its Web GPT service headlessly when enabled, but the Web GPT models
+require the ChatGPT desktop app and are not a working provider inside T3
+Code/CodeLaunch (they cannot make tool calls there). Keep
+`CODEX_WEB_GPT_MANAGED=0` for normal Codex models; see
+[SETUP.md](SETUP.md#step-6---codex-web-gpt-optional).
 
 ## Screenshots + Remote Control Demo
 

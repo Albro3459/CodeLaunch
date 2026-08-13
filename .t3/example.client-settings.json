@@ -23,7 +23,7 @@
         },
         {
             "provider": "codex",
-            "model": "chatgpt-web/high"
+            "model": "gpt-5.6-sol"
         }
     ],
     "providerModelPreferences": {

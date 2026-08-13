@@ -14,6 +14,21 @@ Then you can lock the screen and close the lid. On battery it stops.
 
 ## Start
 
+The example T3 settings keep the native `codex` provider enabled. Before using
+normal Codex models, quit the **ChatGPT** desktop app so T3 Code can own its
+Codex app-server processes. CodeLaunch checks this and warns without quitting
+the app for you. To quit it gracefully:
+
+```bash
+osascript -e 'tell application "ChatGPT" to quit'
+```
+
+If you need to diagnose a conflict, inspect the relevant processes with:
+
+```bash
+ps -ax -o pid,ppid,command | grep -E 'ChatGPT.app./codex|codex-code-mode-host'
+```
+
 ```bash
 ./start.sh
 ```
@@ -62,8 +77,10 @@ working.
 
 ## Codex Web GPT
 
-Off by default. Adds the `chatgpt-web/*` models to the Codex provider in T3, on top
-of the normal Codex ones. Install or update the launcher with:
+Off by default. When enabled, `start.sh` can start the Web GPT service headlessly
+for the **ChatGPT** desktop integration. It requires the ChatGPT desktop app and
+is not a usable provider inside T3 Code/CodeLaunch: Web GPT models cannot make
+tool calls there. Install or update the launcher with:
 
 ```bash
 curl -fsSL https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/install-launcher.sh | sh
@@ -73,10 +90,11 @@ Quit the app first when updating - the script will not overwrite a running launc
 Then finish setup in the app. Nothing goes on your PATH; CodeLaunch finds the CLI
 itself and keeps finding it across updates.
 
-Set `CODEX_WEB_GPT_MANAGED=1` in `.env`. After that, `start.sh` points Codex at the
-launcher and opens it hidden if it is not already running; `stop.sh` points Codex back
-and quits the launcher only if it started it. Turn off **Launch at login** in the app
-if you want `start.sh` to own that.
+Set `CODEX_WEB_GPT_MANAGED=1` in `.env`. After that, `start.sh` checks that the
+ChatGPT desktop app is running and starts the service headlessly if needed;
+`stop.sh` restores the native route and quits only a launcher it started itself.
+This mode is for ChatGPT desktop integration, not T3 model use. Turn off **Launch
+at login** in the app if you want `start.sh` to own launcher startup.
 
 If the app is missing or its setup is incomplete, both scripts print a warning and
 carry on. [More](SETUP.md#step-6---codex-web-gpt-optional).

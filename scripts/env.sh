@@ -141,6 +141,92 @@ codelaunch_require_env() {
   done
 }
 
+# Best-effort GUI alert for startup preflight warnings. The terminal warning is
+# always emitted by the caller, so headless starts do not depend on a GUI or on
+# AppleScript being available.
+codelaunch_macos_alert() {
+  local title=${1:-CodeLaunch} message=${2:-}
+  [ -x /usr/bin/osascript ] || return 0
+  /usr/bin/osascript - "$title" "$message" >/dev/null 2>&1 <<'APPLESCRIPT' || true
+on run argv
+  set alertTitle to item 1 of argv
+  set alertMessage to item 2 of argv
+  display alert alertTitle message alertMessage as warning
+end run
+APPLESCRIPT
+}
+
+# Print the PIDs of the actual ChatGPT desktop app process. Matching the
+# executable inside ChatGPT.app avoids confusing unrelated command-line tools
+# or the app's helper processes with the desktop app itself.
+codelaunch_chatgpt_desktop_pids() {
+  local line pid ppid command
+  while IFS= read -r line; do
+    line=${line#"${line%%[![:space:]]*}"}
+    [ -n "$line" ] || continue
+    pid=${line%%[[:space:]]*}
+    line=${line#"$pid"}
+    line=${line#"${line%%[![:space:]]*}"}
+    ppid=${line%%[[:space:]]*}
+    command=${line#"$ppid"}
+    command=${command#"${command%%[![:space:]]*}"}
+    if [[ "$command" =~ /ChatGPT\.app/Contents/MacOS/ChatGPT([[:space:]]|$) ]]; then
+      printf '%s\n' "$pid"
+    fi
+  done < <(ps -ax -o pid=,ppid=,command= 2>/dev/null || true)
+}
+
+# Print PID/command rows for Codex processes owned by, or embedded in, the
+# ChatGPT desktop app. codex-code-mode-host is included because it can remain
+# after the app's visible process exits and still conflict with T3's server.
+codelaunch_chatgpt_codex_conflict_processes() {
+  local line pid ppid command
+  while IFS= read -r line; do
+    line=${line#"${line%%[![:space:]]*}"}
+    [ -n "$line" ] || continue
+    pid=${line%%[[:space:]]*}
+    line=${line#"$pid"}
+    line=${line#"${line%%[![:space:]]*}"}
+    ppid=${line%%[[:space:]]*}
+    command=${line#"$ppid"}
+    command=${command#"${command%%[![:space:]]*}"}
+    if [[ "$command" == *ChatGPT.app/*/codex* || "$command" == *codex-code-mode-host* ]]; then
+      printf '%s %s %s\n' "$pid" "$ppid" "$command"
+    fi
+  done < <(ps -ax -o pid=,ppid=,command= 2>/dev/null || true)
+}
+
+# Check which side owns the Codex app-server before any services are started.
+# This never starts or quits ChatGPT; callers can act on the printed command.
+codelaunch_codex_desktop_preflight() {
+  local managed=${1:-0} chatgpt_pids conflict_processes
+  chatgpt_pids=$(codelaunch_chatgpt_desktop_pids)
+
+  if [ "$managed" = 1 ]; then
+    if [ -z "$chatgpt_pids" ]; then
+      echo "WARNING: ChatGPT Desktop is not running."
+      echo "  Codex Web GPT can start headless, but its web-backed Codex models will not work without the ChatGPT app; CodeLaunch did not start it."
+      codelaunch_macos_alert "ChatGPT Desktop is not running" "Codex Web GPT models require the ChatGPT Desktop app to be running. CodeLaunch did not start the app."
+      return 1
+    fi
+    return 0
+  fi
+
+  conflict_processes=$(codelaunch_chatgpt_codex_conflict_processes)
+  if [ -n "$chatgpt_pids" ] || [ -n "$conflict_processes" ]; then
+    echo "WARNING: ChatGPT Desktop or its Codex processes are running and conflict with T3's Codex app-server."
+    echo "  With CODEX_WEB_GPT_MANAGED=0, T3 must own the Codex app-server; models and tool calls can fail until the conflicting processes are gone."
+    [ -z "$conflict_processes" ] || {
+      echo "  conflicting process(es):"
+      while IFS= read -r line; do echo "    $line"; done <<< "$conflict_processes"
+    }
+    echo "  Quit ChatGPT manually, then rerun ./start.sh:"
+    echo "    osascript -e 'tell application \"ChatGPT\" to quit'"
+    codelaunch_macos_alert "ChatGPT must be quit" "Quit ChatGPT before starting CodeLaunch so T3 can own the Codex app-server. Run: osascript -e 'tell application \"ChatGPT\" to quit'"
+    return 1
+  fi
+}
+
 codelaunch_private_file() {
   [ ! -e "$1" ] || chmod 600 "$1"
 }

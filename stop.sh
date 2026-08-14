@@ -9,16 +9,24 @@ cd "$(dirname "$0")"
 usage() {
   cat <<'EOF'
 Usage: ./stop.sh [-a|--all]
+       ./stop.sh t3
        ./stop.sh -h|--help
 EOF
 }
 
 ALL=0
+T3_ONLY=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -a|--all)
       [ "$ALL" = 0 ] || { echo "duplicate --all option" >&2; usage >&2; exit 2; }
+      [ "$T3_ONLY" = 0 ] || { echo "invalid option combination" >&2; usage >&2; exit 2; }
       ALL=1; shift
+      ;;
+    t3)
+      [ "$T3_ONLY" = 0 ] || { echo "duplicate t3 mode" >&2; usage >&2; exit 2; }
+      [ "$ALL" = 0 ] || { echo "invalid option combination" >&2; usage >&2; exit 2; }
+      T3_ONLY=1; shift
       ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -38,26 +46,30 @@ case "$CODEX_WEB_GPT_MANAGED" in
 esac
 
 # --- b. tunnel (SIGTERM, honor 30s grace, force with a second signal) ---
-tunnel_pids=$(codelaunch_tunnel_pids "$TUNNEL_NAME")
-if [ -n "$tunnel_pids" ]; then
-  echo "stopping tunnel $TUNNEL_NAME ..."
-  for p in $tunnel_pids; do kill "$p" 2>/dev/null || true; done
-  for _ in $(seq 1 35); do
-    tunnel_alive=0
-    for p in $tunnel_pids; do
-      if kill -0 "$p" 2>/dev/null; then tunnel_alive=1; break; fi
-    done
-    [ "$tunnel_alive" = 0 ] && break
-    sleep 1
-  done
+if [ "$T3_ONLY" = 0 ]; then
   tunnel_pids=$(codelaunch_tunnel_pids "$TUNNEL_NAME")
   if [ -n "$tunnel_pids" ]; then
-    echo "tunnel still up after grace - sending second signal"
+    echo "stopping tunnel $TUNNEL_NAME ..."
     for p in $tunnel_pids; do kill "$p" 2>/dev/null || true; done
+    for _ in $(seq 1 35); do
+      tunnel_alive=0
+      for p in $tunnel_pids; do
+        if kill -0 "$p" 2>/dev/null; then tunnel_alive=1; break; fi
+      done
+      [ "$tunnel_alive" = 0 ] && break
+      sleep 1
+    done
+    tunnel_pids=$(codelaunch_tunnel_pids "$TUNNEL_NAME")
+    if [ -n "$tunnel_pids" ]; then
+      echo "tunnel still up after grace - sending second signal"
+      for p in $tunnel_pids; do kill "$p" 2>/dev/null || true; done
+    fi
+    echo "tunnel stopped"
+  else
+    echo "tunnel already stopped"
   fi
-  echo "tunnel stopped"
 else
-  echo "tunnel already stopped"
+  echo "leaving tunnel $TUNNEL_NAME running (T3-only stop)"
 fi
 
 # --- c. T3 backend on $T3_PORT ---
@@ -111,6 +123,11 @@ if [ -n "$claudex_pids" ]; then
   for p in $claudex_pids; do kill "$p" 2>/dev/null || true; done
 else
   echo "no claudex sessions running"
+fi
+
+if [ "$T3_ONLY" = 1 ]; then
+  echo "T3-only stop complete; CLIProxyAPI, tunnel, Docker Desktop, native Claude Code, caffeinate, and T3 Connect relays remain running"
+  exit 0
 fi
 
 # --- e. Codex Web GPT (optional, same behavior with or without --all) ---

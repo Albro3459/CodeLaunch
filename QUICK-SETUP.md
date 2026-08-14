@@ -54,6 +54,16 @@ Stops the tunnel, T3 backend, claudex sessions, and proxy. Leaves Docker Desktop
 native Claude Code, and `caffeinate` up. Pass `--all` to also stop Docker Desktop and
 the caffeinate this repo started. It never touches anything it did not start.
 
+After running `/login` in Claude Code or refreshing another CLI account, restart
+only the T3 backend so it reloads the account without interrupting the proxy or
+tunnel:
+
+```bash
+./t3-restart.sh
+```
+
+This is equivalent to `./stop.sh t3 && ./t3-pair.sh --ensure-only`.
+
 ## Push notifications
 
 Off by default. Turning it on sends thread and project titles to `relay.t3.codes`,

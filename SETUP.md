@@ -855,6 +855,20 @@ Docker containers, or unowned `caffeinate` processes.
 
 Every kill is guarded with `|| true` so re-runs are clean no-ops.
 
+### Refreshing CLI authentication
+
+After re-authenticating Claude Code or a Codex CLI account, restart only the T3
+backend so it reloads the account without stopping CLIProxyAPI or the Cloudflare
+tunnel:
+
+```bash
+./t3-restart.sh
+```
+
+This runs `./stop.sh t3 && ./t3-pair.sh --ensure-only`. The `t3` stop mode also
+stops CodeLaunch-managed Claudex sessions, but leaves the proxy, tunnel, Docker,
+and native CLI sessions running.
+
 ## Step 6 - Codex Web GPT (optional)
 
 Optional, off by default, and independent of the tunnel and the proxy. Codex Web

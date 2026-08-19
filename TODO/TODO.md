@@ -7,7 +7,8 @@ off-network devices.
 
 ## Open
 
-Nothing open.
+- [ ] Implement the T3 Connect/custom lifecycle and feature flags described in
+  [T3-CONNECT-MODES.md](T3-CONNECT-MODES.md).
 
 ## Recurring
 

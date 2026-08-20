@@ -130,15 +130,15 @@ not merely the temporary `npx` parent.
 
 ## Implementation checklist
 
-- [ ] Add and document the new environment variables and defaults.
-- [ ] Gate Claudex, Docker, CLIProxyAPI, and their prerequisites behind
+- [x] Add and document the new environment variables and defaults.
+- [x] Gate Claudex, Docker, CLIProxyAPI, and their prerequisites behind
   `CLAUDEX_ENABLED`.
-- [ ] Add standalone, idempotent `t3-start.sh` and `t3-stop.sh`.
-- [ ] Implement T3 Connect status and link reconciliation.
-- [ ] Implement custom/direct without starting Cloudflare.
-- [ ] Preserve the current custom/full path.
-- [ ] Preserve optional publish-only activity in both custom access modes.
-- [ ] Make `start.sh` and `stop.sh` delegate the T3 lifecycle.
-- [ ] Remove `t3-serve.sh` after its callers are migrated.
-- [ ] Update README, setup, quick-setup, and example environment documentation.
+- [x] Add standalone, idempotent `t3-start.sh` and `t3-stop.sh`.
+- [x] Implement T3 Connect status and link reconciliation.
+- [x] Implement custom/direct without starting Cloudflare.
+- [x] Preserve the current custom/full path.
+- [x] Preserve optional publish-only activity in both custom access modes.
+- [x] Make `start.sh` and `stop.sh` delegate the T3 lifecycle.
+- [x] Remove `t3-serve.sh` after its callers are migrated.
+- [x] Update README, setup, quick-setup, and example environment documentation.
 - [ ] Manually verify detached startup and shutdown from an SSH session.

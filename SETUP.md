@@ -11,7 +11,64 @@ starts `caffeinate` for you but cannot flip Wake for network access - enable it
 once in System Settings and verify `pmset -g | grep womp` shows `1`. With those
 set, locking the screen and closing the lid survive as long as the Mac stays on power.
 
+## Modes
+
+Two independent halves, each behind its own flag in `.env`. The default startup
+runs T3 alone, through T3 Connect; everything else is opt-in.
+
+```bash
+CLAUDEX_ENABLED=0     # Docker, CLIProxyAPI, Codex token, Codex Web GPT
+T3_ENABLED=1          # the T3 lifecycle, owned by t3-start.sh / t3-stop.sh
+T3_MODE=connect       # connect | custom
+T3_CUSTOM_ACCESS=direct   # direct | full; custom mode only
+```
+
+`T3_MODE` has no `off` value - use `T3_ENABLED=0`. `CODEX_WEB_GPT_MANAGED` is
+subordinate to the Claudex path and ignored while `CLAUDEX_ENABLED=0`.
+
+| Configuration | T3 server | Direct access | T3-managed connection | Cloudflare tunnel | Activity publishing |
+| --- | --- | --- | --- | --- | --- |
+| `T3_ENABLED=0` | off | off | off | off | off |
+| `T3_MODE=connect` | on | managed by T3 | on | off | managed by T3 Connect |
+| `custom` + `direct` | on | localhost, plus LAN/Wi-Fi and VPN with `T3_BIND=all` | off | off | optional |
+| `custom` + `full` | on | localhost, plus LAN/Wi-Fi and VPN with `T3_BIND=all` | off | on | optional |
+
+**connect.** T3 Connect owns remote access. `t3-start.sh` reads
+`t3 connect status`, signs in and links this environment when either is missing,
+replaces a link it can explicitly identify as publish-only with a full Connect
+link, starts the server detached, and then reads this boot's link reconcile
+result out of the log. You reach the machine by signing in at `app.t3.codes` or
+in the T3 Code iOS app - there is no pairing code. None of the custom networking
+configuration is read, validated, or exported in this mode: no hostname, port,
+bind, tunnel name, Access email, or Cloudflare team, no `cloudflared`, and no
+CodeLaunch pairing QR codes. `T3_PUBLISH_ACTIVITY` is ignored too, since the full
+Connect link already publishes agent activity.
+
+Sign-in and linking prompt for an out-of-band authorization code, so the first
+run needs a TTY. Over SSH that is fine - the CLI prints a URL to open on any
+device. Without a TTY, `t3-start.sh` prints the two commands to run by hand.
+
+**custom/direct.** The server runs with no managed T3 link and no tunnel.
+`T3_PORT` and `T3_BIND` still apply, and the pairing token points at this machine
+rather than at a tunnel hostname. Cloudflare-only variables are ignored.
+
+`T3_BIND=all` is **not** VPN-only exposure. It binds `0.0.0.0`, so anything that
+can route to this machine can reach the port - on a home or office network that
+means every other device on the same Wi-Fi. The pairing code is the only gate.
+`t3-start.sh` warns about this on every start. With the default
+`T3_BIND=loopback`, direct mode only serves this machine.
+
+**custom/full.** The previous CodeLaunch setup, unchanged: the same server plus
+the Cloudflare Access/Tunnel lifecycle in [Step 4](#step-4---cloudflare-tunnel--access).
+Because the server is bound for direct access, it stays reachable over LAN/Wi-Fi
+or a VPN whenever `T3_BIND=all` and those routes exist.
+
+Steps 1 and 2 below apply only with `CLAUDEX_ENABLED=1`; Step 4 applies only to
+`custom`/`full`; Step 6 applies only with `CLAUDEX_ENABLED=1`.
+
 ## Step 1 - CLIProxyAPI (Docker)
+
+Claudex path only - skip this step entirely with `CLAUDEX_ENABLED=0`.
 
 Prereq: Docker Desktop running (`docker version`, `docker compose version`).
 
@@ -87,6 +144,8 @@ Notes:
 - Re-auth: rerun `./cliproxy/login.sh`, then `./cliproxy/start.sh`.
 
 ## Step 2 - Claudex profile + proxied Claude Code
+
+Claudex path only - skip this step entirely with `CLAUDEX_ENABLED=0`.
 
 Profile lives in `~/.claudex` (isolated via `CLAUDE_CONFIG_DIR`): `CLAUDE.md`
 (Luna-primary, imports shared `~/.claude/CLAUDE.md`), `settings.json` (model
@@ -197,7 +256,8 @@ The example settings enable the native Codex provider with
 - For normal/native Codex models through T3 Code and CodeLaunch, the **ChatGPT**
   desktop app must be quit. T3 uses the Codex app server and must own the
   `codex` processes; the ChatGPT app conflicts with that ownership. CodeLaunch
-  checks this during `start.sh` and warns without quitting the app. Quit it
+  checks this during `start.sh` - in every mode, since T3 needs the app-server
+  whether or not Claudex is running - and warns without quitting the app. Quit it
   gracefully with:
 
   ```bash
@@ -432,6 +492,12 @@ Run only one backend at a time. Pairing tokens and sessions are managed with
 `t3 auth pairing` and `t3 auth session`. Treat a pairing URL as a password.
 
 ## Step 4 - Cloudflare tunnel + Access
+
+`T3_MODE=custom` with `T3_CUSTOM_ACCESS=full` only. Connect mode delegates remote
+access to T3 Connect, and custom/direct serves the machine without a tunnel;
+neither reads any of the configuration below. Sections 4D and 4E also apply to
+custom/direct, with the pairing URL pointing at this machine instead of the
+tunnel hostname.
 
 The Access app + policy, tunnel, and proxied CNAME can all be created through the
 Cloudflare REST API with a scoped token instead of `cloudflared tunnel login`.
@@ -682,8 +748,10 @@ desktop app owns the port, so test it with the app closed.
 
 ### 4E. Direct LAN/VPN pairing - required for the mobile app
 
-The mobile app cannot complete Cloudflare Access, so it must connect directly
-over a trusted LAN or VPN. In `.env`:
+Custom mode only, in both access modes. The mobile app cannot complete
+Cloudflare Access, so under custom/full it must connect directly over a trusted
+LAN or VPN; under custom/direct that is the only way in. (In connect mode the app
+signs in to your T3 account instead and none of this applies.) In `.env`:
 
 ```bash
 T3_BIND=all
@@ -693,23 +761,34 @@ T3_CHANNEL=latest
 `T3_BIND=all` starts the backend on `0.0.0.0`. The Cloudflare tunnel still uses
 loopback. The pairing helper adds direct URLs only for active VPN (`utun*`) and
 Wi-Fi interfaces; Ethernet, inactive interfaces, and link-local addresses are
-not presented.
+not presented - but the bind itself is wider than what is printed.
 
 In the app, choose **Add Environment** and enter only the origin at the front
 of the printed full pair URL, with its explicit `http://` scheme; for example,
 enter `http://10.0.0.7:3773` plus the printed code, not `/pair#token=...`. Do not
 omit the scheme: a bare host may be rewritten to `https://`.
 
-Direct connections bypass Cloudflare Access. The pairing code is the only gate,
-so enable this only on a network you trust. `t3-pair.sh` verifies the live bind
-matches `T3_BIND` and asks you to restart a backend started with the other mode.
+Direct connections bypass Cloudflare Access. This is **not** VPN-only exposure:
+`0.0.0.0` is reachable from anything that can route to this machine, which on a
+home or office network means every other device on the same Wi-Fi, whether or
+not its address was printed. The pairing code is the only gate, so enable this
+only on a network you trust. `t3-start.sh` warns about it on every start, and
+`t3-pair.sh` verifies the live bind matches `T3_BIND` and asks you to restart a
+backend started with the other mode.
 
 ### 4F. Publishing agent activity (push notifications)
 
-Optional, off by default, and independent of everything above. T3 Connect can send
-push notifications and Live Activities to your mobile clients without a managed
-tunnel - the mode the app describes as "Works without a T3 Connect tunnel." That is
-the right mode here, since the tunnel is already yours.
+Custom mode only, optional, off by default, and independent of everything above.
+T3 Connect can send push notifications and Live Activities to your mobile clients
+without a managed tunnel - the mode the app describes as "Works without a T3
+Connect tunnel." That is the right mode when the transport is already yours,
+which is why it applies to custom/direct and custom/full alike.
+
+With `T3_MODE=connect`, `T3_PUBLISH_ACTIVITY` is ignored and this whole section
+is moot: the full Connect link already publishes agent activity. `t3-publish.sh`
+says so rather than creating a second, publish-only link, and `t3-start.sh`
+replaces a publish-only link with a full one if it finds this machine on the
+wrong side of that switch. Only `--disable` still applies in connect mode.
 
 **Understand the trade first.** Push does not travel over your tunnel. This machine
 POSTs to `relay.t3.codes`, which fans out to APNs. On every meaningful thread event it
@@ -730,9 +809,9 @@ Mac. `--publish-only` skips the managed-tunnel path entirely - the `cloudflared`
 install/confirm block is gated behind it - so it will not touch or compete with your
 `$TUNNEL_NAME` tunnel.
 
-Then set `T3_PUBLISH_ACTIVITY=1` in `.env` and restart the stack. The link is only
-provisioned when the backend starts, and `t3-pair.sh` reuses a live backend, so enabling
-this against a running stack does nothing until `./stop.sh && ./start.sh`.
+Then set `T3_PUBLISH_ACTIVITY=1` in `.env` and restart T3. The link is only
+provisioned when the backend starts, and a live backend is reused, so enabling
+this against a running stack does nothing until `./t3-stop.sh && ./t3-start.sh`.
 
 Fan-out is account-scoped, not pairing-scoped: the relay resolves the environment to the
 cloud accounts linked to it and pushes to those accounts' registered devices. The phone
@@ -748,7 +827,7 @@ survive `stop.sh`, `stop.sh --all`, and reboots, so there is nothing to re-run p
 Only `./t3-publish.sh --disable` (stops publishing, keeps the sign-in), `connect unlink`,
 or `connect logout` undo it.
 
-**Why `start.sh` checks this twice.** `connect status` only reads those local files - it
+**Why `t3-start.sh` checks this twice.** `connect status` only reads those local files - it
 never contacts the relay - so `Authorization: stored credential` means a token file
 exists, not that it still refreshes. Meanwhile the backend re-mints the environment
 credential from the relay on *every* start. If that fails - revoked grant, logout from
@@ -759,79 +838,117 @@ another machine, relay unreachable - the previously persisted secrets stay on di
 reconcile is forked behind a retry, so it lands seconds after the server reports ready;
 `--verify-only` waits up to 45s (`T3_PUBLISH_VERIFY_TIMEOUT` to change it) and treats a
 timeout as unknown rather than broken. It is skipped when the desktop app owns the port,
-since `t3-serve.log` then describes a process that is no longer listening.
+since `t3-serve.log` then describes a process that is no longer listening. Connect
+mode does the same read inline, since it depends on the same reconcile.
 
 ## Step 5 - Orchestration (start.sh / stop.sh)
 
-`./start.sh [--detached] [ttl]` brings the stack up in order, each step gated
-on a health check and idempotent so a live stack short-circuits to reuse. `-d`
-and the TTL may appear in either order. Normal mode leaves the pairing helper
-open; detached mode prints the code and all URLs, then exits. Non-TTY execution
-uses detached behavior automatically:
+`start.sh` owns the top-level flags and the Claudex half. `t3-start.sh` and
+`t3-stop.sh` own the T3 half and run standalone, without CodeLaunch driving them.
 
-1. **prereqs** - `.env` is parsed by `scripts/env.sh`, which accepts only the
-   expected variables and never executes it as shell code. `docker`, `cloudflared`,
-   `claude`, `claudex`, `npx`, and required `jq` are checked on PATH (all missing
-   reported at once); `qrencode` remains optional for terminal QR rendering.
-   `./t3-pair.sh --check-only` verifies `T3_CHANNEL` against the installed desktop
-   app, and `./t3-publish.sh --check-only` compares `T3_PUBLISH_ACTIVITY` against
-   what is persisted. Both run before anything starts; the publish check only warns,
-   since a notification setting should not block the stack.
-2. **caffeinate** - warns (not fails) off AC power. It reuses a valid
-   CodeLaunch-owned `caffeinate -dims`; otherwise it reuses an exact pre-existing
-   unowned assertion without claiming it, or starts and records its own process.
-   It cannot enable Wake for network access - that stays a manual `pmset`/System
-   Settings step (`pmset -g | grep womp` must read `1`).
-3. **Docker** - reuse if `docker info` succeeds, else run `docker desktop start`
-   (native Desktop CLI, with existence probed via `docker desktop --help` since
-   `status` can exit non-zero merely because Desktop is stopped) with an
-   `open -g -j -a Docker` fallback, then poll `docker info` up to 120s.
-4. **Codex token** - uses the newest `cliproxy/auth/codex-*.json`, valid while
-   now is before the ISO-8601 `expired` field (compared tz-aware, offset
-   preserved). If expired or missing and stdin is a TTY, it runs
-   `./cliproxy/login.sh` (browser, callback `127.0.0.1:1455`) and re-checks. On a
-   non-TTY it fails and tells you to run login on the host.
-5. **cliproxy** - `./cliproxy/start.sh`, then an authenticated
-   `curl /v1/models` with the key grepped from `config.yaml`. A rejected key
-   fails loudly.
-6. **Codex Web GPT** - a no-op unless `CODEX_WEB_GPT_MANAGED=1`. Requires the
-   ChatGPT desktop app to be running, then connects the reversible route, starts
-   the Web GPT service headlessly if needed, and waits for its loopback daemon
-   to report healthy. It runs before the backend. This is a ChatGPT desktop
-   integration; Web GPT models are not usable inside T3 Code/CodeLaunch and
-   cannot make tool calls there. A desktop-mode mismatch stops startup; later
-   launcher and route failures remain nonfatal warnings. See
-   [Step 6](#step-6---codex-web-gpt-optional).
-7. **backend** - `./t3-pair.sh --ensure-only` reuses or starts the T3 backend and
-   verifies its live bind matches `T3_BIND`. `--ensure-only` and
-   `--check-only` are noninteractive checks; they do not mint a token or open the
-   pairing helper.
-8. **tunnel** - reuse the named `$TUNNEL_NAME` process if it is already up, else
-   launch it
-   to `$HOME/.codelaunch/run/cloudflared-t3.log` and poll for `Registered tunnel
-   connection` (up to 30s, printing `tail -20` on timeout). Reused processes keep
-   their existing log destination until restarted.
-9. **publishing health** - `./t3-publish.sh --verify-only`, a no-op unless
-   `T3_PUBLISH_ACTIVITY=1`. It runs after the tunnel so the backend's link reconcile
-   has had that time to land, then reads `t3-serve.log` for the result and reports
-   any publishes that failed since boot. See
-   [4F](#4f-publishing-agent-activity-push-notifications) for why this is separate
-   from the `--check-only` pass.
-10. **pairing token** - `./t3-pair.sh [--detached] [ttl]` rechecks the backend
-    and mints the one-time token only after the tunnel is ready. `start.sh` passes
-    the TTL and detached choice through; it does not mint a second token.
+`./start.sh [--detached] [ttl]` is idempotent, so a live stack short-circuits to
+reuse. `-d` and the TTL may appear in either order and are passed through to
+`t3-start.sh`, which uses them only in custom modes. Normal mode leaves the
+pairing helper open; detached mode prints the code and all URLs, then exits.
+Non-TTY execution uses detached behavior automatically.
 
-`./stop.sh` reverses the stack and leaves **Docker Desktop, the Docker daemon,
-native Claude Code, and `caffeinate -dims`** running on purpose. It prints a
-reminder to use `./stop.sh --all` for the optional full shutdown:
+1. **flags** - `.env` is parsed by `scripts/env.sh`, which accepts only the
+   expected variables and never executes it as shell code. `CLAUDEX_ENABLED`,
+   `T3_ENABLED`, and `CODEX_WEB_GPT_MANAGED` are validated here; with both halves
+   off, `start.sh` says so and exits 0. The ChatGPT/Codex app-server preflight
+   runs either way: with Claudex on it follows `CODEX_WEB_GPT_MANAGED`, and with
+   Claudex off it takes the `managed=0` side, since T3 must own the app-server.
+2. **caffeinate** - always, regardless of the flags. Warns (not fails) off AC
+   power. It reuses a valid CodeLaunch-owned `caffeinate -dims`; otherwise it
+   reuses an exact pre-existing unowned assertion without claiming it, or starts
+   and records its own process. It cannot enable Wake for network access - that
+   stays a manual `pmset`/System Settings step (`pmset -g | grep womp` must read `1`).
+3. **Claudex path** - the whole block is skipped unless `CLAUDEX_ENABLED=1`, and
+   its prerequisites (`docker`, `claude`, `claudex`, `jq`) are only required then:
+   - **Docker** - reuse if `docker info` succeeds, else run `docker desktop start`
+     (native Desktop CLI, with existence probed via `docker desktop --help` since
+     `status` can exit non-zero merely because Desktop is stopped) with an
+     `open -g -j -a Docker` fallback, then poll `docker info` up to 120s.
+   - **Codex token** - uses the newest `cliproxy/auth/codex-*.json`, valid while
+     now is before the ISO-8601 `expired` field (compared tz-aware, offset
+     preserved). If expired or missing and stdin is a TTY, it runs
+     `./cliproxy/login.sh` (browser, callback `127.0.0.1:1455`) and re-checks. On a
+     non-TTY it fails and tells you to run login on the host.
+   - **cliproxy** - `./cliproxy/start.sh`, then an authenticated `curl /v1/models`
+     with the key grepped from `config.yaml`. A rejected key fails loudly.
+   - **Codex Web GPT** - a further no-op unless `CODEX_WEB_GPT_MANAGED=1`.
+     Requires the ChatGPT desktop app to be running, then connects the reversible
+     route, starts the Web GPT service headlessly if needed, and waits for its
+     loopback daemon to report healthy. This is a ChatGPT desktop integration;
+     Web GPT models are not usable inside T3 Code/CodeLaunch and cannot make tool
+     calls there. Launcher and route failures are nonfatal warnings. See
+     [Step 6](#step-6---codex-web-gpt-optional).
+4. **T3 path** - `./t3-start.sh [--detached] [ttl]` unless `T3_ENABLED=0`.
 
-- **tunnel** - SIGTERM the named `$TUNNEL_NAME` process, wait up to 35s for its
-  grace period, then signal it again if needed. Other `cloudflared` connectors,
-  including T3 Connect relays, are left alone.
-- **T3 backend** - the PID listening on `$T3_PORT`. If its command path contains
-  a desktop app bundle, its app name is passed to AppleScript as an argument for
-  a graceful quit; otherwise the headless `t3 serve` gets SIGTERM then SIGKILL
-  as a last resort.
+### t3-start.sh
+
+Requires `npx` and `jq`. It reads only the mode-selection variables first, so
+connect mode never loads or exports the custom networking configuration. An
+already-running CodeLaunch-owned server is reused as-is; its log still holds this
+boot's reconcile result and must not be truncated by a second start. A server
+started in a different mode is refused rather than adopted, and a headless server
+CodeLaunch did not start is reused rather than duplicated.
+
+In **connect** mode: the `T3_CHANNEL` guard, then the T3 Connect reconciliation
+described in [Modes](#modes), then the detached server, then the link-health
+read, then the sign-in summary. The link mode is not exposed by
+`connect status`, so the publish-only check reads the one secret that records it
+(`~/.t3/userdata/secrets/cloud-cli-desired-link.bin`). A missing or unreadable
+file is never treated as publish-only - a failed read can never cause an unlink.
+
+In **custom** modes: `./t3-pair.sh --check-only` for the channel guard,
+`./t3-publish.sh --check-only` for declared-vs-persisted publishing intent, the
+detached backend on `$BIND_HOST:$T3_PORT`, `./t3-pair.sh --ensure-only` to verify
+the live bind matches `T3_BIND`, the `$TUNNEL_NAME` tunnel in `full`,
+`./t3-publish.sh --verify-only`, and finally the one-time pairing token. The
+publish check only warns, since a notification setting should not block the stack.
+The tunnel is reused if it is already up, else launched to
+`$HOME/.codelaunch/run/cloudflared-t3.log` and polled for `Registered tunnel
+connection` (up to 30s, printing `tail -20` on timeout).
+
+**Detachment.** The server is started under `nohup` with stdin, stdout, and
+stderr detached from the invoking terminal, so it survives the SSH session
+closing. The T3 CLI's only background lifecycle is `t3 service install`, which
+registers a launchd agent that also starts at login - more persistent state than
+a start/stop pair should own - so CodeLaunch supervises the process itself.
+`npx` stays alive as the supervisor and the real server is its node child, so
+startup is not called successful until that child exists and the log has printed
+`T3 Code server is ready.`; a start that never gets there is torn down and
+reported with the tail of its log. Logs go to
+`$HOME/.codelaunch/run/t3-serve.log`, mode 0600.
+
+**Ownership.** `$HOME/.codelaunch/run/t3-serve.pid` records the supervisor PID,
+its start time, its exact command line, and the mode it was started in.
+`t3-tunnel` records the tunnel name in `custom`/`full`. A record that is provably
+dead or recycled is dropped so it cannot wedge a later start; a malformed one
+stops both scripts rather than being guessed at.
+
+### t3-stop.sh
+
+Idempotent, and driven entirely by those records rather than by `.env` - a stack
+started in one mode still tears down correctly after the configuration moved on.
+It SIGTERMs the recorded supervisor and the server child it resolved before
+signalling (the child is reparented once the supervisor exits, so it has to be
+found first), escalates to SIGKILL after 20s, then clears the record. The
+recorded tunnel gets the same 35s grace and second signal as before.
+
+A T3 Desktop app, and any headless server CodeLaunch did not start, are reported
+and left running. T3 account authentication and the T3 Connect link are never
+touched: stopping the server is not a reason to unlink the environment.
+
+### stop.sh
+
+`./stop.sh` calls `./t3-stop.sh` first, then reverses the Claudex side. It leaves
+**Docker Desktop, the Docker daemon, native Claude Code, and `caffeinate -dims`**
+running on purpose, and prints a reminder to use `./stop.sh --all` for the
+optional full shutdown:
+
+- **T3 server and tunnel** - `./t3-stop.sh`, above.
 - **claudex sessions** - matched by the literal `CLAUDE_CONFIG_DIR=$HOME/.claudex`
   in the process **environment** (`ps eww` appends env vars). Native Claude Code
   lacks that marker, so it is never touched. SIGTERM only.
@@ -847,6 +964,10 @@ reminder to use `./stop.sh --all` for the optional full shutdown:
   the sleep assertion before SSH can start the stack again. A pre-existing exact
   `caffeinate -dims` is reused without being claimed and is never stopped.
 
+The Claudex teardown is not gated on `CLAUDEX_ENABLED`, so flipping the flag off
+does not strand services that are still up; each step is already an ownership
+check or a no-op.
+
 `./stop.sh --all` performs the normal teardown, then stops Docker Desktop and,
 last, only the exact `caffeinate -dims` process recorded as CodeLaunch-owned. It
 rechecks ownership before signaling and leaves invalid or changed records alone.
@@ -857,19 +978,20 @@ Every kill is guarded with `|| true` so re-runs are clean no-ops.
 
 ### Refreshing CLI authentication
 
-After re-authenticating Claude Code or a Codex CLI account, restart only the T3
-backend so it reloads the account without stopping CLIProxyAPI or the Cloudflare
-tunnel:
+After re-authenticating Claude Code or a Codex CLI account, restart only T3 so it
+reloads the account without stopping CLIProxyAPI:
 
 ```bash
 ./t3-restart.sh
 ```
 
-This runs `./stop.sh t3 && ./t3-pair.sh --ensure-only`. The `t3` stop mode also
-stops CodeLaunch-managed Claudex sessions, but leaves the proxy, tunnel, Docker,
-and native CLI sessions running.
+This runs `./stop.sh t3 && ./t3-start.sh`. The `t3` stop mode is `t3-stop.sh`
+plus CodeLaunch-managed Claudex sessions, and leaves the proxy, Docker, and
+native CLI sessions running.
 
 ## Step 6 - Codex Web GPT (optional)
+
+Claudex path only - `CODEX_WEB_GPT_MANAGED` is ignored while `CLAUDEX_ENABLED=0`.
 
 Optional, off by default, and independent of the tunnel and the proxy. Codex Web
 GPT is a separate macOS launcher that runs a loopback Responses daemon for the
@@ -938,12 +1060,14 @@ CODEX_WEB_GPT_MANAGED=1
 ```
 
 Accepted values are `0` and `1`; anything else fails `start.sh` and `stop.sh`
-immediately. At `0` neither script looks at Codex Web GPT at all.
+immediately. At `0` neither script looks at Codex Web GPT at all, and the same is
+true at `1` while `CLAUDEX_ENABLED=0` - `start.sh` notes that the setting is being
+ignored rather than acting on it.
 
 ### 6C. What start and stop actually do
 
 Before starting any services, `start.sh` requires the ChatGPT desktop app to be
-running for this mode. It shows both a terminal warning and a macOS alert, then
+running for this mode, and only checks for it while `CLAUDEX_ENABLED=1`. It shows both a terminal warning and a macOS alert, then
 stops without starting or quitting ChatGPT if the app is absent. After that
 preflight passes, the Web GPT setup runs after the proxy and before the T3
 backend. Failures in the setup steps below are nonfatal warnings:

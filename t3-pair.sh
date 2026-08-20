@@ -6,6 +6,10 @@
 #   ./t3-pair.sh --check-only    # verify T3_CHANNEL vs the desktop app, then exit
 #   ./t3-pair.sh --ensure-only   # ensure the backend, then exit
 #
+# Custom mode only. T3 Connect owns sign-in in connect mode, so there is nothing
+# here to pair; the token URL points at the tunnel in custom/full and at this
+# machine in custom/direct.
+#
 # T3_CHANNEL must match the installed desktop app's channel, since both share the ~/.t3 store and a mismatch can break it. Escape hatch: T3_CHANNEL_SKIP_CHECK=1.
 set -euo pipefail
 umask 077
@@ -50,9 +54,42 @@ while [ "$#" -gt 0 ]; do
 done
 
 codelaunch_private_file .env
-codelaunch_load_env T3_HOSTNAME T3_PORT T3_BIND T3_CHANNEL T3_CHANNEL_SKIP_CHECK
+codelaunch_load_env --optional T3_MODE T3_CUSTOM_ACCESS
+: "${T3_MODE:=connect}"
+case "$T3_MODE" in
+  connect)
+    echo "T3_MODE=connect - T3 Connect owns sign-in, so CodeLaunch mints no pairing token."
+    echo "  Sign in at https://app.t3.codes or in the T3 Code app on iOS."
+    exit 1
+    ;;
+  custom) ;;
+  *) echo "T3_MODE must be 'connect' or 'custom', got '$T3_MODE'"; exit 1 ;;
+esac
+: "${T3_CUSTOM_ACCESS:=direct}"
+case "$T3_CUSTOM_ACCESS" in
+  direct|full) ;;
+  *) echo "T3_CUSTOM_ACCESS must be 'direct' or 'full', got '$T3_CUSTOM_ACCESS'"; exit 1 ;;
+esac
+RUN_MODE="custom-$T3_CUSTOM_ACCESS"
+
+codelaunch_load_env T3_PORT T3_BIND T3_CHANNEL T3_CHANNEL_SKIP_CHECK
 codelaunch_require_env T3_PORT
-if [ "$MODE" = pair ]; then codelaunch_require_env T3_HOSTNAME; fi
+
+# The public hostname is Cloudflare-only configuration, so it is read in
+# custom/full alone; direct pairing points at this machine.
+if [ "$T3_CUSTOM_ACCESS" = full ]; then
+  codelaunch_load_env T3_HOSTNAME
+  PAIR_LABEL=Tunnel
+  PAIR_TOKEN_LABEL=cloudflare-browser
+  if [ "$MODE" = pair ]; then
+    codelaunch_require_env T3_HOSTNAME
+    PAIR_BASE_URL="https://$T3_HOSTNAME"
+  fi
+else
+  PAIR_LABEL=Local
+  PAIR_TOKEN_LABEL=direct-browser
+  PAIR_BASE_URL="http://127.0.0.1:$T3_PORT"
+fi
 
 : "${T3_CHANNEL:=latest}"
 case "$T3_CHANNEL" in
@@ -71,66 +108,9 @@ esac
 listening() { lsof -nP -iTCP:"$T3_PORT" -sTCP:LISTEN 2>/dev/null; }
 
 # --- channel guard ---------------------------------------------------------
-# Reads the channel from CFBundleShortVersionString (e.g. 0.0.29-nightly.20260722.875 -> nightly) so a renamed .app still classifies correctly.
-app_channel() {
-  local ver
-  ver=$(defaults read "$1/Contents/Info" CFBundleShortVersionString 2>/dev/null) || return 1
-  [ -n "$ver" ] || return 1
-  case "$ver" in
-    *nightly*) echo "nightly" ;;
-    *)         echo "latest" ;;
-  esac
-}
+codelaunch_t3_channel_guard "$T3_CHANNEL" "$T3_PORT" || exit 1
 
-# Prefers the app that owns the port, since that's the backend the CLI will migrate against, and falls back to scanning installed bundles if nothing is up.
-desktop_app=""
-running_pid=$(lsof -nP -iTCP:"$T3_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)
-if [ -n "$running_pid" ]; then
-  running_cmd=$(ps -p "$running_pid" -o command= 2>/dev/null || true)
-  # Strips at the first ".app/" to get the outermost bundle, since Electron helper bundles are nested and have no version string of their own.
-  case "$running_cmd" in
-    *.app/Contents/*) desktop_app="${running_cmd%%.app/*}.app" ;;
-  esac
-fi
-if [ -z "$desktop_app" ]; then
-  found=""
-  n=0
-  for d in /Applications "$HOME/Applications"; do
-    for a in "$d"/T3\ Code*.app; do
-      [ -d "$a" ] || continue
-      found="$a"
-      n=$((n + 1))
-    done
-  done
-  # Only counts when exactly one bundle is installed, since with several we can't guess which one owns the port.
-  if [ "$n" -eq 1 ]; then
-    desktop_app="$found"
-  elif [ "$n" -gt 1 ]; then
-    echo "note: multiple T3 Code apps installed - cannot verify T3_CHANNEL against a specific one"
-  fi
-fi
-
-if [ -n "$desktop_app" ] && [ "${T3_CHANNEL_SKIP_CHECK:-0}" != 1 ]; then
-  if app_ch=$(app_channel "$desktop_app"); then
-    if [ "$app_ch" != "$T3_CHANNEL" ]; then
-      echo "REFUSING: T3_CHANNEL=$T3_CHANNEL but the desktop app is '$app_ch'."
-      echo "  app:  $desktop_app"
-      echo "  Mismatched channels can corrupt the shared ~/.t3 store during migrations."
-      echo "  Fix: set T3_CHANNEL=$app_ch in .env, or install the $T3_CHANNEL cask."
-      echo "  Override (not recommended): T3_CHANNEL_SKIP_CHECK=1 ./t3-pair.sh"
-      exit 1
-    fi
-    echo "channel ok: T3_CHANNEL=$T3_CHANNEL matches the desktop app"
-  else
-    echo "note: could not read a version from $desktop_app - skipping channel check"
-  fi
-elif [ "${T3_CHANNEL_SKIP_CHECK:-0}" = 1 ]; then
-  echo "WARNING: T3_CHANNEL_SKIP_CHECK=1 - channel match not verified"
-else
-  echo "no T3 desktop app found - using T3_CHANNEL=$T3_CHANNEL for the headless backend"
-fi
-
-# Callers that only want the guard, like start.sh's pre-flight check, stop here before anything starts.
+# Callers that only want the guard, like t3-start.sh's pre-flight check, stop here before anything starts.
 if [ "$MODE" = check ]; then exit 0; fi
 
 codelaunch_prepare_runtime
@@ -146,13 +126,8 @@ if listening >/dev/null; then
   echo "T3 backend already listening on :$T3_PORT (reusing)"
 else
   echo "starting headless T3 backend ($PKG) on $BIND_HOST:$T3_PORT ..."
-  codelaunch_reset_private_log "$T3_SERVE_LOG"
-  nohup npx --yes "$PKG" serve --host "$BIND_HOST" --port "$T3_PORT" >"$T3_SERVE_LOG" 2>&1 &
-  for _ in $(seq 1 30); do
-    listening >/dev/null && break
-    sleep 1
-  done
-  listening >/dev/null || { echo "backend did not come up; see $T3_SERVE_LOG"; exit 1; }
+  codelaunch_t3_serve_start "$RUN_MODE" "$PKG" "$T3_SERVE_LOG" \
+    --host "$BIND_HOST" --port "$T3_PORT" >/dev/null || exit 1
   echo "backend up"
 fi
 
@@ -183,7 +158,7 @@ if [ "$T3_BIND" = loopback ]; then
 else
   if ! printf '%s\n' "$listener_lines" | grep -qE '(^|[[:space:]])(\*|0\.0\.0\.0):'"$T3_PORT"'([[:space:]]|$)'; then
     echo "REFUSING: T3_BIND=all but nothing is listening on the wildcard address."
-    echo "  Restart the backend with ./stop.sh && ./start.sh"
+    echo "  Restart the backend with ./t3-stop.sh && ./t3-start.sh"
     printf '%s\n' "$listener_lines"
     exit 1
   fi
@@ -195,8 +170,8 @@ if [ "$MODE" = ensure ]; then exit 0; fi
 echo "minting pairing token (ttl $TTL) ..."
 if ! pairing_json=$(npx --yes "$PKG" auth pairing create \
   --ttl "$TTL" \
-  --label "cloudflare-browser" \
-  --base-url "https://$T3_HOSTNAME" \
+  --label "$PAIR_TOKEN_LABEL" \
+  --base-url "$PAIR_BASE_URL" \
   --json); then
   echo "T3 pairing command failed."
   exit 1
@@ -217,4 +192,4 @@ credential=$(printf '%s' "$pairing_json" | jq -r '.credential')
 pair_url=$(printf '%s' "$pairing_json" | jq -r '.pairUrl')
 expires_at=$(printf '%s' "$pairing_json" | jq -r '.expiresAt')
 
-codelaunch_pairing_present "$credential" "$expires_at" "$pair_url" "$T3_PORT" "$T3_BIND" "$DETACHED"
+codelaunch_pairing_present "$credential" "$expires_at" "$pair_url" "$T3_PORT" "$T3_BIND" "$DETACHED" "$PAIR_LABEL"

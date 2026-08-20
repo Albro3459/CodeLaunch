@@ -1,10 +1,12 @@
 # CodeLaunch
 
-Remote Control Agent Setup (Codex in Claude Code w/ [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) and **Remote Control** w/ [T3 Code](https://github.com/pingdotgg/t3code/tree/main/apps/desktop) over HTTPS w/ [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/) + [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/))
+Remote Control Agent Setup. By default `./start.sh` brings up **Remote Control** w/ [T3 Code](https://github.com/pingdotgg/t3code/tree/main/apps/desktop) alone, through **T3 Connect**: sign in from any device and it owns remote access and activity publishing, with no tunnel and no pairing code.
+
+Two opt-in modes on top of that: Codex in Claude Code w/ [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (`CLAUDEX_ENABLED=1`), and hosting T3 yourself over HTTPS w/ [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/) + [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/) (`T3_MODE=custom`).
 
 Tested on an ARM Mac (macOS 26.x), working end to end from off-network devices, phone included. Exact versions in [TOOL-VERSIONS.md](TOOL-VERSIONS.md). Day-to-day start/stop in [QUICK-SETUP.md](QUICK-SETUP.md). Full build docs in [SETUP.md](SETUP.md).
 
-Browsers connect through Cloudflare Access. The mobile app pairs over a trusted LAN or VPN with `T3_BIND=all`; see [SETUP.md](SETUP.md#4e-direct-lanvpn-pairing-required-for-the-mobile-app).
+In `T3_MODE=custom`, browsers connect through Cloudflare Access when `T3_CUSTOM_ACCESS=full`. The mobile app pairs over a trusted LAN or VPN with `T3_BIND=all` in either custom access mode; see [SETUP.md](SETUP.md#4e-direct-lanvpn-pairing-required-for-the-mobile-app). The default `T3_MODE=connect` skips all of this - see [SETUP.md#modes](SETUP.md#modes).
 
 The example T3 settings enable the native `codex` provider. For normal Codex
 models in T3 Code, quit the **ChatGPT** desktop app first: T3 owns the Codex
@@ -16,11 +18,11 @@ instead of quitting it for you:
 osascript -e 'tell application "ChatGPT" to quit'
 ```
 
-`CODEX_WEB_GPT_MANAGED=1` is a separate ChatGPT desktop integration. CodeLaunch
-can start its Web GPT service headlessly when enabled, but the Web GPT models
-require the ChatGPT desktop app and are not a working provider inside T3
-Code/CodeLaunch (they cannot make tool calls there). Keep
-`CODEX_WEB_GPT_MANAGED=0` for normal Codex models; see
+`CODEX_WEB_GPT_MANAGED=1` is a separate ChatGPT desktop integration and requires
+`CLAUDEX_ENABLED=1` - it is ignored otherwise. CodeLaunch can start its Web GPT
+service headlessly when enabled, but the Web GPT models require the ChatGPT
+desktop app and are not a working provider inside T3 Code/CodeLaunch (they cannot
+make tool calls there). Keep `CODEX_WEB_GPT_MANAGED=0` for normal Codex models; see
 [SETUP.md](SETUP.md#step-6---codex-web-gpt-optional).
 
 ## Screenshots + Remote Control Demo

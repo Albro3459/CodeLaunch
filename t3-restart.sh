@@ -3,4 +3,4 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-./stop.sh t3 && ./t3-pair.sh --ensure-only
+./stop.sh t3 && ./t3-start.sh

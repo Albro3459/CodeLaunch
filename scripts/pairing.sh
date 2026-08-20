@@ -2,11 +2,11 @@
 # Shared pairing presentation helper. Source this file; do not execute it.
 
 codelaunch_pairing_present() {
-  local credential=$1 expires_at=$2 pair_url=$3 port=$4 bind=$5 detached=${6:-0}
+  local credential=$1 expires_at=$2 pair_url=$3 port=$4 bind=$5 detached=${6:-0} primary=${7:-Tunnel}
   local -a labels urls
   local row label address choice selected i
 
-  labels=("Tunnel")
+  labels=("$primary")
   urls=("$pair_url")
   if [ "$bind" = all ]; then
     while IFS='|' read -r label address; do

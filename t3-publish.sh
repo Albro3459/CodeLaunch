@@ -45,8 +45,33 @@ while [ "$#" -gt 0 ]; do
 done
 
 codelaunch_private_file .env
-codelaunch_load_env T3_PORT T3_CHANNEL T3_PUBLISH_ACTIVITY
-codelaunch_require_env T3_PORT
+codelaunch_load_env --optional T3_MODE
+: "${T3_MODE:=connect}"
+case "$T3_MODE" in
+  connect|custom) ;;
+  *) echo "T3_MODE must be 'connect' or 'custom', got '$T3_MODE'"; exit 1 ;;
+esac
+# The full T3 Connect link already publishes agent activity, so the publish-only
+# link this script manages is a custom-mode concern. Disabling stays available in
+# both modes, since turning notifications off is always the user's call.
+if [ "$T3_MODE" = connect ]; then
+  case "$MODE" in
+    check)  echo "publish agent activity managed by T3 Connect (T3_MODE=connect)"; exit 0 ;;
+    verify) exit 0 ;;
+    setup)
+      echo "T3_MODE=connect - the full T3 Connect link already publishes agent activity."
+      echo "  There is no publish-only link to set up. Run ./t3-start.sh instead."
+      exit 1
+      ;;
+  esac
+fi
+
+codelaunch_load_env T3_CHANNEL T3_PUBLISH_ACTIVITY
+# Connect mode only reaches here with --disable, which needs no port.
+if [ "$T3_MODE" = custom ]; then
+  codelaunch_load_env T3_PORT
+  codelaunch_require_env T3_PORT
+fi
 
 : "${T3_CHANNEL:=latest}"
 case "$T3_CHANNEL" in
@@ -99,7 +124,7 @@ if [ "$MODE" = check ]; then
       [ "$AUTHENTICATED" = true ] || echo "  not signed in to a T3 cloud account"
       [ "$LINKED" = true ] || echo "  environment link not provisioned"
       [ "$PUBLISH_ENABLED" = true ] || echo "  publishing flag is off"
-      echo "  Fix: ./t3-publish.sh   (headless OAuth, then restart the stack)"
+      echo "  Fix: ./t3-publish.sh   (headless OAuth, then restart T3)"
       echo "  Continuing without push notifications."
     fi
   else
@@ -121,8 +146,6 @@ fi
 # that the stored credential still works - status keeps reporting "provisioned" off stale
 # secrets even when reconcile failed. It is forked behind a retry, so it lands seconds
 # after the server reports ready.
-RECONCILE_OK='T3 Connect desired link reconciled on startup'
-RECONCILE_FAIL='Failed to reconcile T3 Connect desired link on startup'
 
 if [ "$MODE" = verify ]; then
   if [ "$T3_PUBLISH_ACTIVITY" != 1 ]; then exit 0; fi
@@ -152,12 +175,7 @@ if [ "$MODE" = verify ]; then
   case "$T3_PUBLISH_VERIFY_TIMEOUT" in
     ''|*[!0-9]*) echo "T3_PUBLISH_VERIFY_TIMEOUT must be a whole number of seconds"; exit 1 ;;
   esac
-  outcome=''
-  for _ in $(seq 1 "$T3_PUBLISH_VERIFY_TIMEOUT"); do
-    if grep -qF "$RECONCILE_OK" "$T3_SERVE_LOG" 2>/dev/null; then outcome=ok; break; fi
-    if grep -qF "$RECONCILE_FAIL" "$T3_SERVE_LOG" 2>/dev/null; then outcome=failed; break; fi
-    sleep 1
-  done
+  outcome=$(codelaunch_t3_wait_reconcile "$T3_SERVE_LOG" "$T3_PUBLISH_VERIFY_TIMEOUT")
 
   case "$outcome" in
     ok)
@@ -175,8 +193,8 @@ if [ "$MODE" = verify ]; then
       echo "WARNING: T3 Connect link reconcile FAILED this boot - push notifications are not working."
       echo "  The stored credential no longer refreshes, or the relay was unreachable at startup."
       echo "  'npx $PKG connect status' will still say 'provisioned' - it reads stale local files."
-      echo "  Fix: ./t3-publish.sh   (signs in again, then restart the stack)"
-      echo "  Detail: grep -A4 '$RECONCILE_FAIL' $T3_SERVE_LOG"
+      echo "  Fix: ./t3-publish.sh   (signs in again, then restart T3)"
+      echo "  Detail: grep -A4 '$CODELAUNCH_T3_RECONCILE_FAIL' $T3_SERVE_LOG"
       ;;
     *)
       echo "note: no T3 Connect reconcile result in $T3_SERVE_LOG after ${T3_PUBLISH_VERIFY_TIMEOUT}s - publishing health unknown"
@@ -187,7 +205,7 @@ if [ "$MODE" = verify ]; then
 fi
 
 # Both remaining modes run the CLI against the shared ~/.t3 store, so guard the channel first.
-./t3-pair.sh --check-only
+codelaunch_t3_channel_guard "$T3_CHANNEL" "${T3_PORT:-}" || exit 1
 
 if [ "$MODE" = disable ]; then
   echo "disabling agent activity publishing ..."
@@ -195,8 +213,8 @@ if [ "$MODE" = disable ]; then
   echo
   echo "The flag is re-read on every publish, so this takes effect immediately - no restart needed."
   echo "The sign-in and environment link are left in place; re-enable with ./t3-publish.sh."
-  if [ "$T3_PUBLISH_ACTIVITY" = 1 ]; then
-    echo "Set T3_PUBLISH_ACTIVITY=0 in .env so start.sh stops expecting it."
+  if [ "$T3_MODE" = custom ] && [ "$T3_PUBLISH_ACTIVITY" = 1 ]; then
+    echo "Set T3_PUBLISH_ACTIVITY=0 in .env so t3-start.sh stops expecting it."
   fi
   exit 0
 fi
@@ -239,13 +257,13 @@ npx --yes "$PKG" connect status
 
 echo
 if [ "$T3_PUBLISH_ACTIVITY" != 1 ]; then
-  echo "NEXT: set T3_PUBLISH_ACTIVITY=1 in .env, then restart the stack:"
+  echo "NEXT: set T3_PUBLISH_ACTIVITY=1 in .env, then restart T3:"
 else
-  echo "NEXT: restart the stack so the backend provisions the link:"
+  echo "NEXT: restart T3 so the backend provisions the link:"
 fi
 if lsof -nP -iTCP:"$T3_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "  ./stop.sh && ./start.sh"
+  echo "  ./t3-stop.sh && ./t3-start.sh"
   echo "  (a backend is running on :$T3_PORT - it will not pick this up until it restarts)"
 else
-  echo "  ./start.sh"
+  echo "  ./t3-start.sh"
 fi

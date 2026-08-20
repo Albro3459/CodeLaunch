@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Brings the remote-agent stack up, reusing whatever is already running.
-# Prints a one-time T3 pairing token and the main URL when done.
 #
 #   ./start.sh            # 15m pairing token (default)
-#   ./start.sh 5m         # custom TTL, passed to t3-pair.sh
+#   ./start.sh 5m         # custom TTL, passed through to t3-start.sh
 #   ./start.sh --detached # print pairing summary without the menu
 #
-# Order: prereqs, caffeinate, Docker, Codex token, proxy, Codex Web GPT, T3 backend, tunnel, publish check, token.
+# Two independent halves, each behind its own flag:
+#   CLAUDEX_ENABLED=1 -> Docker, CLIProxyAPI, Codex tokens, Codex Web GPT
+#   T3_ENABLED=1      -> ./t3-start.sh, which owns the whole T3 lifecycle
+#
+# Order: flags, caffeinate, Claudex path, T3 path.
 # See SETUP.md "Step 5" and QUICK-SETUP.md.
 set -euo pipefail
 umask 077
@@ -38,42 +41,51 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-# --- a. env ---
+# --- a. feature flags ---
+# Only the top-level flags are read here; t3-start.sh owns everything T3.
 codelaunch_private_file .env
-codelaunch_load_env T3_HOSTNAME T3_PORT T3_BIND T3_CHANNEL T3_CHANNEL_SKIP_CHECK T3_PUBLISH_ACTIVITY CODEX_WEB_GPT_MANAGED TUNNEL_NAME
-codelaunch_require_env T3_HOSTNAME T3_PORT TUNNEL_NAME
-: "${T3_BIND:=loopback}"
+codelaunch_load_env --optional CLAUDEX_ENABLED T3_ENABLED CODEX_WEB_GPT_MANAGED
+: "${CLAUDEX_ENABLED:=0}"
+: "${T3_ENABLED:=1}"
 : "${CODEX_WEB_GPT_MANAGED:=0}"
+case "$CLAUDEX_ENABLED" in
+  0|1) ;;
+  *) echo "CLAUDEX_ENABLED must be '0' or '1', got '$CLAUDEX_ENABLED'"; exit 1 ;;
+esac
+case "$T3_ENABLED" in
+  0|1) ;;
+  *) echo "T3_ENABLED must be '0' or '1', got '$T3_ENABLED'"; exit 1 ;;
+esac
 case "$CODEX_WEB_GPT_MANAGED" in
   0|1) ;;
   *) echo "CODEX_WEB_GPT_MANAGED must be '0' or '1', got '$CODEX_WEB_GPT_MANAGED'"; exit 1 ;;
 esac
-codelaunch_codex_desktop_preflight "$CODEX_WEB_GPT_MANAGED" || exit 1
-if [ "$T3_BIND" = all ]; then
-  echo "WARNING: T3_BIND=all exposes :$T3_PORT to your LAN/VPN; pairing code only"
+if [ "$CLAUDEX_ENABLED" = 0 ] && [ "$T3_ENABLED" = 0 ]; then
+  echo "nothing to start: CLAUDEX_ENABLED=0 and T3_ENABLED=0"
+  exit 0
 fi
-codelaunch_private_file cliproxy/config.yaml
-codelaunch_private_tree cliproxy/auth
-codelaunch_prepare_runtime
-CLOUDFLARED_LOG="$CODELAUNCH_RUNTIME_DIR/cloudflared-t3.log"
-T3_SERVE_LOG="$CODELAUNCH_RUNTIME_DIR/t3-serve.log"
-export T3_SERVE_LOG
+
+# CODEX_WEB_GPT_MANAGED is subordinate to the Claudex path. With Claudex off, T3
+# must own the Codex app-server, which is the managed=0 side of this check.
+if [ "$CLAUDEX_ENABLED" = 1 ]; then
+  codelaunch_codex_desktop_preflight "$CODEX_WEB_GPT_MANAGED" || exit 1
+else
+  [ "$CODEX_WEB_GPT_MANAGED" = 0 ] || echo "note: CODEX_WEB_GPT_MANAGED is ignored while CLAUDEX_ENABLED=0"
+  codelaunch_codex_desktop_preflight 0 || exit 1
+fi
 
 # --- b. prereqs (collect all missing, fail once) ---
-missing=()
-for c in docker cloudflared claude claudex npx jq; do
-  command -v "$c" >/dev/null 2>&1 || missing+=("$c")
-done
-if [ "${#missing[@]}" -gt 0 ]; then
-  echo "missing prerequisites on PATH: ${missing[*]}"; exit 1
+if [ "$CLAUDEX_ENABLED" = 1 ]; then
+  codelaunch_private_file cliproxy/config.yaml
+  codelaunch_private_tree cliproxy/auth
+  missing=()
+  for c in docker claude claudex jq; do
+    command -v "$c" >/dev/null 2>&1 || missing+=("$c")
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    echo "missing prerequisites on PATH: ${missing[*]}"; exit 1
+  fi
 fi
-
-# T3_CHANNEL must match the installed desktop app, checked early so a mismatch fails fast instead of after a full bring-up.
-./t3-pair.sh --check-only
-
-# Declared publishing intent vs what is actually on disk. Warn only - a notification
-# setting should not block the stack. Health is checked after the backend is up.
-./t3-publish.sh --check-only
 
 # --- c. power + keep-awake ---
 if pmset -g batt | grep -q 'AC Power'; then
@@ -111,27 +123,7 @@ else
   fi
 fi
 
-# --- d. Docker ---
-if docker info >/dev/null 2>&1; then
-  echo "docker up"
-else
-  echo "starting Docker Desktop ..."
-  # --help just checks the docker desktop CLI exists, since status can exit non-zero when Desktop is simply stopped.
-  if docker desktop --help >/dev/null 2>&1; then
-    docker desktop start --timeout 120 || true
-  else
-    open -g -j -a Docker
-  fi
-  echo "waiting for docker daemon (up to 120s) ..."
-  for _ in $(seq 1 120); do
-    docker info >/dev/null 2>&1 && break
-    sleep 1
-  done
-  docker info >/dev/null 2>&1 || { echo "docker did not come up within 120s"; exit 1; }
-  echo "docker up"
-fi
-
-# --- e. Codex OAuth token ---
+# --- d. Claudex path ---
 # Valid while now < the ISO-8601 `expired` field (carries a tz offset).
 codex_remaining() {
   python3 - "$1" <<'PY'
@@ -148,43 +140,8 @@ rem = exp - now
 print(f"{rem.days}d {rem.seconds // 3600}h")
 PY
 }
-newest_codex=$(ls -t cliproxy/auth/codex-*.json 2>/dev/null | head -1 || true)
-need_login=0
-if [ -z "$newest_codex" ]; then
-  need_login=1
-elif rem=$(codex_remaining "$newest_codex"); then
-  echo "codex token valid ($rem left)"
-else
-  need_login=1
-fi
-if [ "$need_login" = 1 ]; then
-  if [ -t 0 ]; then
-    echo "codex token missing or expired - launching ./cliproxy/login.sh (opens the host browser) ..."
-    ./cliproxy/login.sh
-    newest_codex=$(ls -t cliproxy/auth/codex-*.json 2>/dev/null | head -1 || true)
-    if [ -n "$newest_codex" ] && rem=$(codex_remaining "$newest_codex"); then
-      echo "codex token valid ($rem left)"
-    else
-      echo "still no valid codex token after login"; exit 1
-    fi
-  else
-    echo "codex token missing or expired and no TTY - run ./cliproxy/login.sh on the host"; exit 1
-  fi
-fi
 
-# --- f. proxy ---
-echo "starting proxy ..."
-./cliproxy/start.sh
-KEY=$(grep -oE '[0-9a-f]{64}' cliproxy/config.yaml | head -1 || true)
-[ -n "$KEY" ] || { echo "no local API key found in cliproxy/config.yaml"; exit 1; }
-# Key goes to curl via stdin (-K -), not argv, so it never shows in ps.
-if ! printf 'header = "Authorization: Bearer %s"\n' "$KEY" \
-  | curl -fsS -K - http://127.0.0.1:8317/v1/models >/dev/null 2>&1; then
-  echo "proxy up but local API key rejected - check cliproxy/config.yaml"; exit 1
-fi
-echo "proxy up and key accepted"
-
-# --- g. Codex Web GPT (optional, nonfatal) ---
+# Codex Web GPT is optional and nonfatal; it only ever manages a launcher it started.
 start_codex_web_gpt() {
   [ "$CODEX_WEB_GPT_MANAGED" = 1 ] || return 0
 
@@ -340,37 +297,75 @@ start_codex_web_gpt() {
     fi
   fi
 }
-start_codex_web_gpt
 
-# --- h. T3 backend ---
-echo "ensuring T3 backend ..."
-./t3-pair.sh --ensure-only
-
-# --- i. tunnel ---
-if [ -n "$(codelaunch_tunnel_pids "$TUNNEL_NAME")" ]; then
-  echo "tunnel $TUNNEL_NAME already running (reusing)"
-else
-  echo "starting tunnel $TUNNEL_NAME ..."
-  codelaunch_reset_private_log "$CLOUDFLARED_LOG"
-  nohup cloudflared tunnel run "$TUNNEL_NAME" >"$CLOUDFLARED_LOG" 2>&1 &
-  for _ in $(seq 1 30); do
-    grep -q "Registered tunnel connection" "$CLOUDFLARED_LOG" 2>/dev/null && break
-    sleep 1
-  done
-  if ! grep -q "Registered tunnel connection" "$CLOUDFLARED_LOG" 2>/dev/null; then
-    echo "tunnel did not register within 30s; last log lines:"
-    tail -20 "$CLOUDFLARED_LOG"
-    exit 1
+if [ "$CLAUDEX_ENABLED" = 1 ]; then
+  # Docker
+  if docker info >/dev/null 2>&1; then
+    echo "docker up"
+  else
+    echo "starting Docker Desktop ..."
+    # --help just checks the docker desktop CLI exists, since status can exit non-zero when Desktop is simply stopped.
+    if docker desktop --help >/dev/null 2>&1; then
+      docker desktop start --timeout 120 || true
+    else
+      open -g -j -a Docker
+    fi
+    echo "waiting for docker daemon (up to 120s) ..."
+    for _ in $(seq 1 120); do
+      docker info >/dev/null 2>&1 && break
+      sleep 1
+    done
+    docker info >/dev/null 2>&1 || { echo "docker did not come up within 120s"; exit 1; }
+    echo "docker up"
   fi
-  echo "tunnel registered"
+
+  # Codex OAuth token
+  newest_codex=$(ls -t cliproxy/auth/codex-*.json 2>/dev/null | head -1 || true)
+  need_login=0
+  if [ -z "$newest_codex" ]; then
+    need_login=1
+  elif rem=$(codex_remaining "$newest_codex"); then
+    echo "codex token valid ($rem left)"
+  else
+    need_login=1
+  fi
+  if [ "$need_login" = 1 ]; then
+    if [ -t 0 ]; then
+      echo "codex token missing or expired - launching ./cliproxy/login.sh (opens the host browser) ..."
+      ./cliproxy/login.sh
+      newest_codex=$(ls -t cliproxy/auth/codex-*.json 2>/dev/null | head -1 || true)
+      if [ -n "$newest_codex" ] && rem=$(codex_remaining "$newest_codex"); then
+        echo "codex token valid ($rem left)"
+      else
+        echo "still no valid codex token after login"; exit 1
+      fi
+    else
+      echo "codex token missing or expired and no TTY - run ./cliproxy/login.sh on the host"; exit 1
+    fi
+  fi
+
+  # CLIProxyAPI
+  echo "starting proxy ..."
+  ./cliproxy/start.sh
+  KEY=$(grep -oE '[0-9a-f]{64}' cliproxy/config.yaml | head -1 || true)
+  [ -n "$KEY" ] || { echo "no local API key found in cliproxy/config.yaml"; exit 1; }
+  # Key goes to curl via stdin (-K -), not argv, so it never shows in ps.
+  if ! printf 'header = "Authorization: Bearer %s"\n' "$KEY" \
+    | curl -fsS -K - http://127.0.0.1:8317/v1/models >/dev/null 2>&1; then
+    echo "proxy up but local API key rejected - check cliproxy/config.yaml"; exit 1
+  fi
+  echo "proxy up and key accepted"
+
+  start_codex_web_gpt
+else
+  echo "Claudex path off (CLAUDEX_ENABLED=0) - skipping Docker, CLIProxyAPI, Codex tokens, and Codex Web GPT"
 fi
 
-# --- j. publishing health ---
-# Runs after the tunnel so the backend's reconcile has had that time to land.
-./t3-publish.sh --verify-only
-
-# --- k. one-time pairing token ---
-echo "minting pairing token ..."
-PAIR_ARGS=("$TTL")
-[ "$DETACHED" = 1 ] && PAIR_ARGS+=(--detached)
-./t3-pair.sh "${PAIR_ARGS[@]}"
+# --- e. T3 path ---
+if [ "$T3_ENABLED" = 1 ]; then
+  T3_ARGS=("$TTL")
+  [ "$DETACHED" = 1 ] && T3_ARGS+=(--detached)
+  ./t3-start.sh "${T3_ARGS[@]}"
+else
+  echo "T3 off (T3_ENABLED=0) - skipping ./t3-start.sh"
+fi

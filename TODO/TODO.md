@@ -7,14 +7,18 @@ off-network devices.
 
 ## Open
 
-- [ ] Implement the T3 Connect/custom lifecycle and feature flags described in
-  [T3-CONNECT-MODES.md](T3-CONNECT-MODES.md).
+- [ ] Manually verify `t3-start.sh` / `t3-stop.sh` from an SSH session: the start
+  returns control, the server survives the session closing, a second start is a
+  no-op, and the stop leaves T3 Desktop and the T3 Connect sign-in alone. Last
+  unchecked item in [T3-CONNECT-MODES.md](T3-CONNECT-MODES.md).
 
 ## Recurring
 
 - [ ] After a `t3-code` cask auto-update: re-check the version, that the backend
   still binds `127.0.0.1:3773` only, and the Claude HOME field behavior noted in
-  SETUP.md Step 3.
+  SETUP.md Step 3. In connect mode also re-check that `t3 connect`'s
+  login/link/unlink/status subcommands and the `cloud-cli-desired-link` secret
+  still behave the way `t3-start.sh` reconciles against.
 - [ ] Audit remote access occasionally: `t3 auth session list` /
   `t3 auth pairing list`, revoke anything stale. Skim the Cloudflare Access
   logs too.

@@ -7,10 +7,7 @@ off-network devices.
 
 ## Open
 
-- [ ] Manually verify `t3-start.sh` / `t3-stop.sh` from an SSH session: the start
-  returns control, the server survives the session closing, a second start is a
-  no-op, and the stop leaves T3 Desktop and the T3 Connect sign-in alone. Last
-  unchecked item in [T3-CONNECT-MODES.md](T3-CONNECT-MODES.md).
+Nothing open.
 
 ## Recurring
 

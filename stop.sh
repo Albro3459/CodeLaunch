@@ -47,7 +47,14 @@ case "$CODEX_WEB_GPT_MANAGED" in
 esac
 
 # --- b. T3 server and its tunnel ---
-./t3-stop.sh
+# Guarded like every kill below: a failure here must not strand the proxy, Docker,
+# and caffeinate. The status is carried to the exit so ./t3-restart.sh's && still
+# sees a failed stop instead of restarting into the server that never died.
+t3_status=0
+./t3-stop.sh || {
+  t3_status=$?
+  echo "WARNING: ./t3-stop.sh failed (exit $t3_status); continuing with the rest of the teardown"
+}
 
 # --- c. claudex Claude sessions only ---
 # Matches the CLAUDE_CONFIG_DIR marker in the process environment so native Claude Code sessions are left alone.
@@ -63,7 +70,7 @@ fi
 
 if [ "$T3_ONLY" = 1 ]; then
   echo "T3-only stop complete; CLIProxyAPI, Docker Desktop, native Claude Code, and caffeinate remain running"
-  exit 0
+  exit "$t3_status"
 fi
 
 # --- d. Codex Web GPT (optional, same behavior with or without --all) ---
@@ -278,3 +285,5 @@ else
   echo "left running: Docker Desktop + daemon, native Claude Code sessions, caffeinate, T3 Connect relays"
   echo "Use ./stop.sh --all to also stop Docker Desktop and CodeLaunch-owned caffeinate."
 fi
+
+[ "$t3_status" = 0 ] || exit "$t3_status"

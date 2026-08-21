@@ -151,6 +151,7 @@ if [ "$T3_BIND" = loopback ]; then
   non_loopback=$(printf '%s\n' "$listener_lines" | grep -vE '(^|[[:space:]])(127\.0\.0\.1|\[::1\]|::1):' || true)
   if [ -n "$non_loopback" ]; then
     echo "REFUSING: T3_BIND=loopback but the backend is bound wider. Fix before pairing."
+    echo "  Restart the backend with ./t3-stop.sh && ./t3-start.sh"
     echo "$non_loopback"
     exit 1
   fi

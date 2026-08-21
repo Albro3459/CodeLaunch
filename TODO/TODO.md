@@ -35,6 +35,10 @@ off-network devices.
 
 ## Settled (do not reopen)
 
+- The `a42e4ef` T3 Connect review is closed: five fixes applied, both open
+  questions decided. `t3-restart.sh` is meant to mint a fresh token and show the
+  QR in custom mode. Details in
+  [T3-CONNECT-REVIEW.md](T3-CONNECT-REVIEW.md).
 - Codex Web GPT launcher lifecycle is done and tested: `start.sh`/`stop.sh` use
   opt-in, reversible `route connect`/`route disconnect`, only ever stop a
   launcher they started, and never uninstall. Details in git

@@ -31,8 +31,8 @@ Claudex path.
 | --- | --- | --- | --- | --- | --- |
 | `T3_ENABLED=0` | Off | Off | Off | Off | Off |
 | `T3_MODE=connect` | On | Managed by T3 | On | Off | Managed by T3 Connect |
-| `T3_MODE=custom`, `T3_CUSTOM_ACCESS=direct` | On | Localhost, LAN/Wi-Fi, and VPN | Off | Off | Optional |
-| `T3_MODE=custom`, `T3_CUSTOM_ACCESS=full` | On | Localhost, LAN/Wi-Fi, and VPN | Off | On | Optional |
+| `T3_MODE=custom`, `T3_CUSTOM_ACCESS=direct` | On | Localhost, plus LAN/Wi-Fi and VPN with `T3_BIND=all` | Off | Off | Optional |
+| `T3_MODE=custom`, `T3_CUSTOM_ACCESS=full` | On | Localhost, plus LAN/Wi-Fi and VPN with `T3_BIND=all` | Off | On | Optional |
 
 ### Connect
 

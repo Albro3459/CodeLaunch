@@ -363,9 +363,12 @@ fi
 
 # --- e. T3 path ---
 if [ "$T3_ENABLED" = 1 ]; then
-  T3_ARGS=("$TTL")
+  # Only forward pairing options the caller actually gave, so connect mode does
+  # not report ignoring a TTL nobody asked for. t3-start.sh defaults to 15m too.
+  T3_ARGS=()
+  [ "$TTL_SET" = 1 ] && T3_ARGS+=("$TTL")
   [ "$DETACHED" = 1 ] && T3_ARGS+=(--detached)
-  ./t3-start.sh "${T3_ARGS[@]}"
+  ./t3-start.sh ${T3_ARGS[@]+"${T3_ARGS[@]}"}
 else
   echo "T3 off (T3_ENABLED=0) - skipping ./t3-start.sh"
 fi

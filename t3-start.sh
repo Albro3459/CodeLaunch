@@ -83,8 +83,11 @@ CLOUDFLARED_LOG="$CODELAUNCH_RUNTIME_DIR/cloudflared-t3.log"
 # --- b. already-running server ---------------------------------------------
 # An owned server is reused as-is: its log still holds this boot's reconcile
 # result, so it must not be truncated by a second start.
+# Called directly, not through $( ): the recorded mode only reaches this shell
+# when the function does not run in a subshell.
 owned_pid=''
-if owned_pid=$(codelaunch_t3_owned_pid); then
+if codelaunch_t3_owned_pid >/dev/null; then
+  owned_pid=$CODELAUNCH_T3_PID
   if [ "$CODELAUNCH_T3_MODE" = "$RUN_MODE" ]; then
     echo "T3 server already owned by CodeLaunch (reusing PID $owned_pid, mode $CODELAUNCH_T3_MODE)"
   else

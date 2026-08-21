@@ -28,11 +28,13 @@ done
 
 # --- a. the server we own --------------------------------------------------
 # Shutdown reads the recorded mode rather than .env, so a stack started in one
-# mode still tears down correctly after the configuration moved on.
+# mode still tears down correctly after the configuration moved on. Called
+# directly, not through $( ): the record only reaches this shell that way.
 owned_pid=''
 owned_children=''
 run_mode=''
-if owned_pid=$(codelaunch_t3_owned_pid); then
+if codelaunch_t3_owned_pid >/dev/null; then
+  owned_pid=$CODELAUNCH_T3_PID
   run_mode=$CODELAUNCH_T3_MODE
   owned_children=$(codelaunch_t3_server_child_pids "$owned_pid" | tr '\n' ' ')
   echo "stopping CodeLaunch-owned T3 server (PID $owned_pid, mode $run_mode) ..."

@@ -481,8 +481,9 @@ codelaunch_t3_state_matches() {
   [ "$(codelaunch_t3_start_identity "$pid" 2>/dev/null)" = "$CODELAUNCH_T3_START_IDENTITY" ]
 }
 
-# Prints the owned PID, leaving CODELAUNCH_T3_MODE set. Returns 1 when nothing
-# is owned, 2 when the record exists but cannot be trusted.
+# Prints the owned PID and leaves CODELAUNCH_T3_PID/CODELAUNCH_T3_MODE set, so
+# call it directly - through $( ) the record stays in the subshell. Returns 1
+# when nothing is owned, 2 when the record exists but cannot be trusted.
 codelaunch_t3_owned_pid() {
   local pid rc
   codelaunch_t3_read_state

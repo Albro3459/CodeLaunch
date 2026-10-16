@@ -81,7 +81,8 @@ account without interrupting the Claudex proxy:
 ./t3-restart.sh
 ```
 
-This is equivalent to `./stop.sh t3 && ./t3-start.sh`.
+This is equivalent to `./stop.sh t3 && ./t3-start.sh`. It takes the same options
+as `./t3-start.sh`, like `./t3-restart.sh -d` for the pairing summary without the menu.
 
 ## Push notifications
 

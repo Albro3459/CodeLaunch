@@ -31,12 +31,12 @@ done
 # mode still tears down correctly after the configuration moved on. Called
 # directly, not through $( ): the record only reaches this shell that way.
 owned_pid=''
-owned_children=''
+owned_tree=''
 run_mode=''
 if codelaunch_t3_owned_pid >/dev/null; then
   owned_pid=$CODELAUNCH_T3_PID
   run_mode=$CODELAUNCH_T3_MODE
-  owned_children=$(codelaunch_t3_server_child_pids "$owned_pid" | tr '\n' ' ')
+  owned_tree=$(codelaunch_t3_descendant_pids "$owned_pid" | tr '\n' ' ')
   echo "stopping CodeLaunch-owned T3 server (PID $owned_pid, mode $run_mode) ..."
   if codelaunch_t3_stop_pid "$owned_pid"; then
     if codelaunch_t3_clear_state; then
@@ -58,7 +58,18 @@ else
   fi
 fi
 
-# --- b. the tunnel we started ----------------------------------------------
+# --- b. servers an earlier run lost track of -------------------------------
+# Unquoted on purpose - both are numeric PID lists that must word-split.
+for stray_pid in $(codelaunch_t3_stray_pids $owned_pid $owned_tree); do
+  echo "stopping T3 server left running by an earlier CodeLaunch run (PID $stray_pid) ..."
+  if codelaunch_t3_stop_pid "$stray_pid"; then
+    echo "T3 server stopped"
+  else
+    echo "WARNING: T3 server is still running after SIGKILL (PID $stray_pid)"
+  fi
+done
+
+# --- c. the tunnel we started ----------------------------------------------
 tunnel_name=''
 if codelaunch_t3_read_tunnel_state; then
   tunnel_name=$CODELAUNCH_T3_TUNNEL
@@ -96,9 +107,8 @@ if [ -n "$tunnel_name" ]; then
   fi
 fi
 
-# --- c. what was left alone ------------------------------------------------
-# Unquoted on purpose - both are numeric PID lists that must word-split.
-unowned=$(codelaunch_t3_unowned_pids $owned_pid $owned_children | tr '\n' ' ')
+# --- d. what was left alone ------------------------------------------------
+unowned=$(codelaunch_t3_unowned_pids $owned_pid $owned_tree | tr '\n' ' ')
 unowned=${unowned% }
 if [ -n "$unowned" ]; then
   echo "headless T3 server(s) not started by CodeLaunch left running (PID $unowned)"

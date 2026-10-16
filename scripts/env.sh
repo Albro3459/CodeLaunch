@@ -417,16 +417,45 @@ codelaunch_t3_command() {
   printf '%s\n' "$CODELAUNCH_VALUE"
 }
 
-# `npx` stays alive as the server's supervisor, but the long-lived server is the
-# node child it spawns. Resolve it before signalling, since it is reparented to
-# launchd once the supervisor exits and can no longer be found by parent.
-codelaunch_t3_server_child_pids() {
-  local parent=$1 pid args
+# Every descendant of $1. Collect them before signalling, since each one is
+# reparented to launchd once its parent exits and can no longer be found by parent.
+codelaunch_t3_descendant_pids() {
+  local parent=$1 pid
   case "$parent" in ''|*[!0-9]*) return 0 ;; esac
   for pid in $(pgrep -P "$parent" 2>/dev/null || true); do
-    args=$(ps -ww -p "$pid" -o args= 2>/dev/null) || continue
-    case "$args" in *"t3 serve"*) printf '%s\n' "$pid" ;; esac
+    printf '%s\n' "$pid"
+    codelaunch_t3_descendant_pids "$pid"
   done
+}
+
+codelaunch_t3_is_serve() {
+  local args
+  args=$(ps -ww -p "$1" -o args= 2>/dev/null) || return 1
+  case "$args" in
+    *.app/Contents/*) return 1 ;;
+    *"t3 serve"*) return 0 ;;
+  esac
+  return 1
+}
+
+# The deepest `t3 serve` process is the real server. Since 0.1.0, `npx t3` runs
+# a node launcher that spawnSyncs the native binary without forwarding signals,
+# so npx, sh, and that launcher all match `t3 serve` above it.
+codelaunch_t3_is_server() {
+  local pid=$1 child
+  codelaunch_t3_is_serve "$pid" || return 1
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    if codelaunch_t3_is_serve "$child"; then return 1; fi
+  done
+  return 0
+}
+
+codelaunch_t3_server_pid() {
+  local pid
+  for pid in $(codelaunch_t3_descendant_pids "$1"); do
+    if codelaunch_t3_is_server "$pid"; then printf '%s\n' "$pid"; return 0; fi
+  done
+  return 1
 }
 
 codelaunch_t3_read_state() {
@@ -506,51 +535,56 @@ codelaunch_t3_owned_pid() {
 # Headless T3 servers that CodeLaunch did not start, minus any PID passed in.
 # Reported, never signalled.
 codelaunch_t3_unowned_pids() {
-  local excluded=" $* " pid args
+  local excluded=" $* " pid
   for pid in $(pgrep -f 't3 serve' 2>/dev/null || true); do
     case "$excluded" in *" $pid "*) continue ;; esac
-    args=$(ps -ww -p "$pid" -o args= 2>/dev/null) || continue
-    case "$args" in
-      *.app/Contents/*) continue ;;
-      *"t3 serve"*) printf '%s\n' "$pid" ;;
-    esac
+    if codelaunch_t3_is_server "$pid"; then printf '%s\n' "$pid"; fi
   done
 }
 
-# SIGTERM the supervisor and its server child, escalating once after a grace period.
+# Unowned servers an earlier CodeLaunch run started and lost track of, like the
+# native server that stops before 0.1.0 support left running. Their stdout is
+# still the CodeLaunch log, which proves who started them.
+codelaunch_t3_stray_pids() {
+  local log="$HOME/.codelaunch/run/t3-serve.log" pid out
+  for pid in $(codelaunch_t3_unowned_pids "$@"); do
+    out=$(lsof -a -p "$pid" -d 1 -Fn 2>/dev/null | sed -n 's/^n//p')
+    [ "$out" = "$log" ] && printf '%s\n' "$pid"
+  done
+  return 0
+}
+
+# SIGTERM the process and everything under it, escalating once after a grace period.
 codelaunch_t3_stop_pid() {
-  local pid=$1 children child alive _
-  children=$(codelaunch_t3_server_child_pids "$pid")
-  kill "$pid" 2>/dev/null || true
-  for child in $children; do kill "$child" 2>/dev/null || true; done
+  local pid=$1 pids p alive _
+  pids="$pid $(codelaunch_t3_descendant_pids "$pid" | tr '\n' ' ')"
+  for p in $pids; do kill "$p" 2>/dev/null || true; done
   for _ in $(seq 1 20); do
     alive=0
-    if kill -0 "$pid" 2>/dev/null; then alive=1; fi
-    for child in $children; do
-      if kill -0 "$child" 2>/dev/null; then alive=1; fi
+    for p in $pids; do
+      if kill -0 "$p" 2>/dev/null; then alive=1; fi
     done
     [ "$alive" = 0 ] && return 0
     sleep 1
   done
-  kill -9 "$pid" 2>/dev/null || true
-  for child in $children; do kill -9 "$child" 2>/dev/null || true; done
+  for p in $pids; do kill -9 "$p" 2>/dev/null || true; done
   sleep 1
-  if kill -0 "$pid" 2>/dev/null; then return 1; fi
-  for child in $children; do
-    if kill -0 "$child" 2>/dev/null; then return 1; fi
+  for p in $pids; do
+    if kill -0 "$p" 2>/dev/null; then return 1; fi
   done
   return 0
 }
 
 # Starts `t3 serve` fully detached from the calling shell, verifies the server
-# child actually came up, and records ownership. Extra arguments go to the CLI.
+# actually came up, and records ownership of the server itself, since the npx
+# chain above it can die without taking it down. Extra arguments go to the CLI.
 # The T3 CLI's only background lifecycle is `t3 service install`, which registers
 # a launchd agent that also starts at login - too much persistent state for a
 # start/stop pair, so CodeLaunch supervises the process itself.
 codelaunch_t3_serve_start() {
   local mode=$1 pkg=$2 log=$3
   shift 3
-  local pid='' child='' ready=0 _
+  local pid='' server='' ready=0 _
   codelaunch_reset_private_log "$log" || return 1
   nohup npx --yes "$pkg" serve "$@" </dev/null >"$log" 2>&1 &
   pid=$!
@@ -565,19 +599,19 @@ codelaunch_t3_serve_start() {
     codelaunch_t3_stop_pid "$pid" || true
     return 1
   fi
-  child=$(codelaunch_t3_server_child_pids "$pid" | head -1)
-  if [ -z "$child" ]; then
+  server=$(codelaunch_t3_server_pid "$pid" || true)
+  if [ -z "$server" ]; then
     echo "T3 server process could not be verified; last log lines:" >&2
     tail -20 "$log" >&2
     codelaunch_t3_stop_pid "$pid" || true
     return 1
   fi
-  if ! codelaunch_t3_write_state "$pid" "$mode"; then
-    echo "T3 server started, but CodeLaunch could not record ownership of PID $pid" >&2
-    echo "  It will be left running on stop. Stop it with: kill $pid" >&2
+  if ! codelaunch_t3_write_state "$server" "$mode"; then
+    echo "T3 server started, but CodeLaunch could not record ownership of PID $server" >&2
+    echo "  ./t3-stop.sh will still find it through its log. Or stop it with: kill $server" >&2
     return 1
   fi
-  printf '%s\n' "$pid"
+  printf '%s\n' "$server"
 }
 
 codelaunch_t3_tunnel_state_file() {

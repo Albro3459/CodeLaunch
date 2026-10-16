@@ -916,14 +916,16 @@ stderr detached from the invoking terminal, so it survives the SSH session
 closing. The T3 CLI's only background lifecycle is `t3 service install`, which
 registers a launchd agent that also starts at login - more persistent state than
 a start/stop pair should own - so CodeLaunch supervises the process itself.
-`npx` stays alive as the supervisor and the real server is its node child, so
-startup is not called successful until that child exists and the log has printed
-`T3 Code server is ready.`; a start that never gets there is torn down and
+Since 0.1.0, `npx t3` runs a node launcher that starts the native `t3` binary and
+does not forward signals to it, so the real server sits a few processes below
+`npx`. Startup is not called successful until that server exists and the log has
+printed `T3 Code server is ready.`; a start that never gets there is torn down and
 reported with the tail of its log. Logs go to
 `$HOME/.codelaunch/run/t3-serve.log`, mode 0600.
 
-**Ownership.** `$HOME/.codelaunch/run/t3-serve.pid` records the supervisor PID,
-its start time, its exact command line, and the mode it was started in.
+**Ownership.** `$HOME/.codelaunch/run/t3-serve.pid` records the server PID (the
+deepest `t3 serve` process), its start time, its exact command line, and the mode
+it was started in.
 `t3-tunnel` records the tunnel name in `custom`/`full`. A record that is provably
 dead or recycled is dropped so it cannot wedge a later start; a malformed one
 stops both scripts rather than being guessed at.
@@ -932,13 +934,16 @@ stops both scripts rather than being guessed at.
 
 Idempotent, and driven entirely by those records rather than by `.env` - a stack
 started in one mode still tears down correctly after the configuration moved on.
-It SIGTERMs the recorded supervisor and the server child it resolved before
-signalling (the child is reparented once the supervisor exits, so it has to be
-found first), escalates to SIGKILL after 20s, then clears the record. The
+It SIGTERMs the recorded server and every process under it (collected before
+signalling, since each one is reparented once its parent exits), escalates to
+SIGKILL after 20s, then clears the record. The
 recorded tunnel gets the same 35s grace and second signal as before.
 
-A T3 Desktop app, and any headless server CodeLaunch did not start, are reported
-and left running. T3 account authentication and the T3 Connect link are never
+A headless server whose stdout is still `$HOME/.codelaunch/run/t3-serve.log`
+was started by an earlier CodeLaunch run that lost its record, like the native
+server older stops left behind after the 0.1.0 update. It gets stopped the same
+way. A T3 Desktop app, and any headless server CodeLaunch did not start, are
+reported and left running. T3 account authentication and the T3 Connect link are never
 touched: stopping the server is not a reason to unlink the environment.
 
 ### stop.sh
@@ -985,7 +990,8 @@ reloads the account without stopping CLIProxyAPI:
 ./t3-restart.sh
 ```
 
-This runs `./stop.sh t3 && ./t3-start.sh`. The `t3` stop mode is `t3-stop.sh`
+This runs `./stop.sh t3 && ./t3-start.sh`, passing its arguments to
+`./t3-start.sh`, so `./t3-restart.sh -d 5m` works. The `t3` stop mode is `t3-stop.sh`
 plus CodeLaunch-managed Claudex sessions, and leaves the proxy, Docker, and
 native CLI sessions running.
 

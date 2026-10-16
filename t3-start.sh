@@ -183,9 +183,14 @@ if [ "$RUN_MODE" = connect ]; then
 
   # --- e. connect: server --------------------------------------------------
   if [ -z "$owned_pid" ]; then
+    stray=$(codelaunch_t3_stray_pids | tr '\n' ' ')
+    stray=${stray% }
     unowned=$(codelaunch_t3_unowned_pids | tr '\n' ' ')
     unowned=${unowned% }
-    if [ -n "$unowned" ]; then
+    if [ -n "$stray" ]; then
+      echo "a T3 server left running by an earlier CodeLaunch run is up (PID $stray) - reusing it"
+      echo "  ./t3-stop.sh will stop it."
+    elif [ -n "$unowned" ]; then
       echo "a headless T3 server is already running but was not started by CodeLaunch (PID $unowned) - reusing it"
       echo "  ./t3-stop.sh will leave it alone. Stop it yourself to hand the lifecycle to CodeLaunch."
     else
@@ -262,7 +267,11 @@ fi
 
 # --- h. custom: backend ----------------------------------------------------
 if [ -z "$owned_pid" ]; then
-  if lsof -nP -iTCP:"$T3_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  listener=$(lsof -nP -iTCP:"$T3_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)
+  if [ -n "$listener" ] && codelaunch_t3_stray_pids | grep -Fx "$listener" >/dev/null; then
+    echo "T3 backend on :$T3_PORT was left running by an earlier CodeLaunch run (PID $listener) - reusing it"
+    echo "  ./t3-stop.sh will stop it."
+  elif [ -n "$listener" ]; then
     echo "T3 backend already listening on :$T3_PORT but not started by CodeLaunch - reusing it"
     echo "  ./t3-stop.sh will leave it alone."
   else

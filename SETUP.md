@@ -41,8 +41,10 @@ result out of the log. You reach the machine by signing in at `app.t3.codes` or
 in the T3 Code iOS app - there is no pairing code. None of the custom networking
 configuration is read, validated, or exported in this mode: no hostname, port,
 bind, tunnel name, Access email, or Cloudflare team, no `cloudflared`, and no
-CodeLaunch pairing QR codes. `T3_PUBLISH_ACTIVITY` is ignored too, since the full
-Connect link already publishes agent activity.
+CodeLaunch pairing QR codes. `T3_PUBLISH_ACTIVITY` is ignored too. Mobile
+notifications and Live Activities still require the separate activity publishing
+flag, which can be enabled from the CLI without a restart. See
+[Publishing agent activity](#4f-publishing-agent-activity-push-notifications).
 
 Sign-in and linking prompt for an out-of-band authorization code, so the first
 run needs a TTY. Over SSH that is fine - the CLI prints a URL to open on any
@@ -778,17 +780,41 @@ backend started with the other mode.
 
 ### 4F. Publishing agent activity (push notifications)
 
-Custom mode only, optional, off by default, and independent of everything above.
-T3 Connect can send push notifications and Live Activities to your mobile clients
-without a managed tunnel - the mode the app describes as "Works without a T3
-Connect tunnel." That is the right mode when the transport is already yours,
-which is why it applies to custom/direct and custom/full alike.
+**Enable notifications on an existing Connect link.** A working T3 Connect
+connection does not guarantee activity publishing is enabled. If mobile
+notifications and Live Activities are missing, run this on the Mac:
 
-With `T3_MODE=connect`, `T3_PUBLISH_ACTIVITY` is ignored and this whole section
-is moot: the full Connect link already publishes agent activity. `t3-publish.sh`
-says so rather than creating a second, publish-only link, and `t3-start.sh`
-replaces a publish-only link with a full one if it finds this machine on the
-wrong side of that switch. Only `--disable` still applies in connect mode.
+```bash
+npx --yes t3@latest connect publish
+npx --yes t3@latest connect status
+```
+
+Use the same channel or pinned version as the running server (`t3@nightly` if
+`T3_CHANNEL=nightly`). On an already linked machine, the publishing flag is read
+by the running server on each publish, so this takes effect immediately and
+persists across restarts. There is no need to stop the CLI server, open the
+desktop app, or get a localhost pairing token. This resolved missing
+notifications with server 0.1.2 and mobile app 2.1.0.
+
+Sign in to the same T3 Connect account on the phone. Enable **Device
+Notifications** and **Live Activity Updates** in **Settings → Notifications**,
+and allow notifications in the phone's system settings. Check ordinary alerts
+with the app in the background, since they stay quiet while it is open.
+
+`T3_MODE=connect` ignores `T3_PUBLISH_ACTIVITY`. CodeLaunch's startup checks
+verify the Connect link, but do not verify that activity publishing is enabled.
+`t3-publish.sh` setup and `--check-only` assume the full Connect link handles
+publishing; use `connect publish` to enable the flag directly. To disable it
+without signing out, use `connect publish --disable` with the same CLI version.
+
+After enabling, check `~/.codelaunch/run/t3-serve.log` for `agent activity publish
+completed`, `ok: true`, and the delivery counts. A queued delivery means the relay
+accepted it for delivery; confirm receipt on the phone too.
+
+**Set up publishing in custom mode.** This is optional, off by default, and
+independent of your tunnel. T3 Connect can send push notifications and Live
+Activities without a managed tunnel - the mode the app describes as "Works
+without a T3 Connect tunnel." This applies to custom/direct and custom/full alike.
 
 **Understand the trade first.** Push does not travel over your tunnel. This machine
 POSTs to `relay.t3.codes`, which fans out to APNs. On every meaningful thread event it

@@ -86,11 +86,28 @@ as `./t3-start.sh`, like `./t3-restart.sh -d` for the pairing summary without th
 
 ## Push notifications
 
-`T3_MODE=custom` only, off by default. Turning it on sends thread and project titles
-to `relay.t3.codes`, which forwards them to your phone. No code or diffs, and it does
-not use your tunnel. This is the only part of the stack that sends anything off your
-machine. `T3_MODE=connect` ignores `T3_PUBLISH_ACTIVITY` entirely - the full T3
-Connect link already publishes agent activity.
+**Connect mode:** remote access can work while mobile notifications and Live
+Activities are off. On an already linked machine, enable activity publishing from
+the CLI:
+
+```bash
+npx --yes t3@latest connect publish
+npx --yes t3@latest connect status
+```
+
+Use the same channel or pinned version as the running server (`t3@nightly` if
+`T3_CHANNEL=nightly`). Publishing takes effect immediately and survives restarts.
+You can leave T3 running in the CLI. No desktop app or localhost pairing is needed.
+`T3_PUBLISH_ACTIVITY` is ignored in Connect mode, and CodeLaunch's startup checks
+do not verify that the publishing flag is enabled.
+
+On the phone, sign in to the same T3 Connect account and enable **Device
+Notifications** and **Live Activity Updates** in **Settings → Notifications**.
+Background the app to check ordinary alerts, which stay quiet while it is open.
+
+**Custom mode:** publishing is optional and off by default. It sends thread and
+project titles to `relay.t3.codes`, which forwards them to your phone. No code or
+diffs are sent, and it does not use your tunnel.
 [More](SETUP.md#4f-publishing-agent-activity-push-notifications).
 
 ```bash

@@ -66,7 +66,7 @@ if [ "$T3_MODE" = connect ]; then
   esac
 fi
 
-codelaunch_load_env T3_CHANNEL T3_PUBLISH_ACTIVITY
+codelaunch_load_env T3_CHANNEL T3_PUBLISH_ACTIVITY T3_WARP_REPO
 # Connect mode only reaches here with --disable, which needs no port.
 if [ "$T3_MODE" = custom ]; then
   codelaunch_load_env T3_PORT
@@ -79,6 +79,7 @@ case "$T3_CHANNEL" in
   *) echo "T3_CHANNEL must be 'nightly' or 'latest', got '$T3_CHANNEL'"; exit 1 ;;
 esac
 PKG="t3@$T3_CHANNEL"
+codelaunch_t3_cli_init "$PKG" || exit 1
 
 : "${T3_PUBLISH_ACTIVITY:=0}"
 case "$T3_PUBLISH_ACTIVITY" in
@@ -86,8 +87,8 @@ case "$T3_PUBLISH_ACTIVITY" in
   *) echo "T3_PUBLISH_ACTIVITY must be '0' or '1', got '$T3_PUBLISH_ACTIVITY'"; exit 1 ;;
 esac
 
-SETUP_HINT_LOGIN="npx --yes $PKG connect login --headless"
-SETUP_HINT_LINK="npx --yes $PKG connect link --publish-only --headless"
+SETUP_HINT_LOGIN="$CODELAUNCH_T3_HINT connect login --headless"
+SETUP_HINT_LINK="$CODELAUNCH_T3_HINT connect link --publish-only --headless"
 
 # --- persisted state -------------------------------------------------------
 # `connect status --json` reads ~/.t3/userdata/secrets only. `authenticated` means a
@@ -95,7 +96,7 @@ SETUP_HINT_LINK="npx --yes $PKG connect link --publish-only --headless"
 read_status() {
   command -v jq >/dev/null 2>&1 || { echo "missing required dependency: jq"; echo "Install it with: brew install jq"; exit 1; }
   local json
-  if ! json=$(npx --yes "$PKG" connect status --json 2>/dev/null); then
+  if ! json=$(codelaunch_t3_cli connect status --json 2>/dev/null); then
     echo "could not read T3 Connect status"
     exit 1
   fi
@@ -192,7 +193,7 @@ if [ "$MODE" = verify ]; then
     failed)
       echo "WARNING: T3 Connect link reconcile FAILED this boot - push notifications are not working."
       echo "  The stored credential no longer refreshes, or the relay was unreachable at startup."
-      echo "  'npx $PKG connect status' will still say 'provisioned' - it reads stale local files."
+      echo "  '$CODELAUNCH_T3_HINT connect status' will still say 'provisioned' - it reads stale local files."
       echo "  Fix: ./t3-publish.sh   (signs in again, then restart T3)"
       echo "  Detail: grep -A4 '$CODELAUNCH_T3_RECONCILE_FAIL' $T3_SERVE_LOG"
       ;;
@@ -209,7 +210,7 @@ codelaunch_t3_channel_guard "$T3_CHANNEL" "${T3_PORT:-}" || exit 1
 
 if [ "$MODE" = disable ]; then
   echo "disabling agent activity publishing ..."
-  npx --yes "$PKG" connect publish --disable
+  codelaunch_t3_cli connect publish --disable
   echo
   echo "The flag is re-read on every publish, so this takes effect immediately - no restart needed."
   echo "The sign-in and environment link are left in place; re-enable with ./t3-publish.sh."
@@ -246,14 +247,14 @@ esac
 
 echo
 echo "step 1/2: signing in (headless - open the URL on any device with a browser)"
-npx --yes "$PKG" connect login --headless
+codelaunch_t3_cli connect login --headless
 
 echo
 echo "step 2/2: linking this environment for publishing only (no managed tunnel)"
-npx --yes "$PKG" connect link --publish-only --headless
+codelaunch_t3_cli connect link --publish-only --headless
 
 echo
-npx --yes "$PKG" connect status
+codelaunch_t3_cli connect status
 
 echo
 if [ "$T3_PUBLISH_ACTIVITY" != 1 ]; then

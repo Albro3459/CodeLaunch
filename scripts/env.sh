@@ -12,7 +12,7 @@ codelaunch_trim() {
 codelaunch_allowed_env() {
   case "$1" in
     CLAUDEX_ENABLED|T3_ENABLED|T3_MODE|T3_CUSTOM_ACCESS) return 0 ;;
-    T3_HOSTNAME|T3_PORT|T3_BIND|T3_CHANNEL|T3_CHANNEL_SKIP_CHECK|T3_PUBLISH_ACTIVITY|CODEX_WEB_GPT_MANAGED|TUNNEL_NAME|ACCESS_EMAIL|CLOUDFLARE_TEAM) return 0 ;;
+    T3_HOSTNAME|T3_PORT|T3_BIND|T3_CHANNEL|T3_CHANNEL_SKIP_CHECK|T3_PUBLISH_ACTIVITY|T3_WARP_REPO|CODEX_WEB_GPT_MANAGED|TUNNEL_NAME|ACCESS_EMAIL|CLOUDFLARE_TEAM) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -382,6 +382,39 @@ codelaunch_t3_channel_guard() {
   echo "channel ok: T3_CHANNEL=$channel matches the desktop app"
 }
 
+# Picks the T3 CLI that every script runs. Unset T3_WARP_REPO runs npx $1. Set,
+# it's a t3-code-warp checkout: its server source on the Node version t3code
+# pins (from fnm), its built web client, and its Warp surface, all on the same
+# ~/.t3 store. Sets CODELAUNCH_T3_CLI (an array) and CODELAUNCH_T3_HINT, the
+# same command to print. Call it directly so the array reaches the caller.
+codelaunch_t3_cli_init() {
+  local pkg=$1 repo=${T3_WARP_REPO:-} node
+  if [ -z "$repo" ]; then
+    CODELAUNCH_T3_CLI=(npx --yes "$pkg")
+    CODELAUNCH_T3_HINT="npx --yes $pkg"
+    return 0
+  fi
+  case "$repo" in
+    /*) ;;
+    *) echo "T3_WARP_REPO must be an absolute path, got '$repo'" >&2; return 1 ;;
+  esac
+  [ -f "$repo/t3code/apps/server/src/bin.ts" ] || { echo "T3_WARP_REPO is not a t3-code-warp checkout: $repo" >&2; return 1; }
+  [ -f "$repo/t3code/apps/web/dist/index.html" ] || { echo "T3_WARP_REPO's web client isn't built. Run: cd $repo/t3code && vp run build" >&2; return 1; }
+  [ -f "$repo/warp/target/t3-bundle/current/assets/client/wasm/warp.js" ] || { echo "T3_WARP_REPO has no Warp bundle in warp/target/t3-bundle/current. See its docs/stage-1-checkpoint.md" >&2; return 1; }
+  [ -d "$repo/panelwarp/node_modules/node-pty" ] || { echo "T3_WARP_REPO's panelwarp has no node_modules. Run: cd $repo/panelwarp && npm install" >&2; return 1; }
+  command -v fnm >/dev/null 2>&1 || { echo "missing prerequisite on PATH: fnm (T3_WARP_REPO runs on the Node version t3code pins)" >&2; return 1; }
+  node=$(cd "$repo/t3code" && fnm exec -- node -p process.execPath 2>/dev/null) \
+    || { echo "fnm has no Node for $repo/t3code. Run: cd $repo/t3code && fnm install" >&2; return 1; }
+  export T3CODE_WARP_BUNDLE_DIR="$repo/warp/target/t3-bundle/current"
+  export T3CODE_PANELWARP_DIR="$repo/panelwarp"
+  CODELAUNCH_T3_CLI=("$node" "$repo/t3code/apps/server/src/bin.ts")
+  CODELAUNCH_T3_HINT="$node $repo/t3code/apps/server/src/bin.ts"
+}
+
+codelaunch_t3_cli() {
+  "${CODELAUNCH_T3_CLI[@]}" "$@"
+}
+
 # Prints ok, failed, or unknown for this boot's T3 Connect link reconcile.
 codelaunch_t3_wait_reconcile() {
   local log=$1 timeout=${2:-45} _
@@ -419,10 +452,15 @@ codelaunch_t3_command() {
 
 # Every descendant of $1. Collect them before signalling, since each one is
 # reparented to launchd once its parent exits and can no longer be found by parent.
+# Skips t3-code-warp's PTY daemon and its shells: it outlives the server on
+# purpose, so Warp's shells survive a restart.
 codelaunch_t3_descendant_pids() {
   local parent=$1 pid
   case "$parent" in ''|*[!0-9]*) return 0 ;; esac
   for pid in $(pgrep -P "$parent" 2>/dev/null || true); do
+    case "$(ps -ww -p "$pid" -o args= 2>/dev/null)" in
+      */panelwarp/daemon.js) continue ;;
+    esac
     printf '%s\n' "$pid"
     codelaunch_t3_descendant_pids "$pid"
   done
@@ -433,7 +471,7 @@ codelaunch_t3_is_serve() {
   args=$(ps -ww -p "$1" -o args= 2>/dev/null) || return 1
   case "$args" in
     *.app/Contents/*) return 1 ;;
-    *"t3 serve"*) return 0 ;;
+    *"t3 serve"*|*"/t3code/apps/server/src/bin.ts serve"*) return 0 ;;
   esac
   return 1
 }
@@ -450,9 +488,10 @@ codelaunch_t3_is_server() {
   return 0
 }
 
+# $1 itself counts: T3_WARP_REPO starts node with no launcher above it.
 codelaunch_t3_server_pid() {
   local pid
-  for pid in $(codelaunch_t3_descendant_pids "$1"); do
+  for pid in "$1" $(codelaunch_t3_descendant_pids "$1"); do
     if codelaunch_t3_is_server "$pid"; then printf '%s\n' "$pid"; return 0; fi
   done
   return 1
@@ -536,7 +575,7 @@ codelaunch_t3_owned_pid() {
 # Reported, never signalled.
 codelaunch_t3_unowned_pids() {
   local excluded=" $* " pid
-  for pid in $(pgrep -f 't3 serve' 2>/dev/null || true); do
+  for pid in $(pgrep -f 't3 serve|/t3code/apps/server/src/bin\.ts serve' 2>/dev/null || true); do
     case "$excluded" in *" $pid "*) continue ;; esac
     if codelaunch_t3_is_server "$pid"; then printf '%s\n' "$pid"; fi
   done
@@ -578,15 +617,16 @@ codelaunch_t3_stop_pid() {
 # Starts `t3 serve` fully detached from the calling shell, verifies the server
 # actually came up, and records ownership of the server itself, since the npx
 # chain above it can die without taking it down. Extra arguments go to the CLI.
+# Needs codelaunch_t3_cli_init first.
 # The T3 CLI's only background lifecycle is `t3 service install`, which registers
 # a launchd agent that also starts at login - too much persistent state for a
 # start/stop pair, so CodeLaunch supervises the process itself.
 codelaunch_t3_serve_start() {
-  local mode=$1 pkg=$2 log=$3
-  shift 3
+  local mode=$1 log=$2
+  shift 2
   local pid='' server='' ready=0 _
   codelaunch_reset_private_log "$log" || return 1
-  nohup npx --yes "$pkg" serve "$@" </dev/null >"$log" 2>&1 &
+  nohup "${CODELAUNCH_T3_CLI[@]}" serve "$@" </dev/null >"$log" 2>&1 &
   pid=$!
   for _ in $(seq 1 90); do
     if grep -qF "$CODELAUNCH_T3_READY" "$log" 2>/dev/null; then ready=1; break; fi

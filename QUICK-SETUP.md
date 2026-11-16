@@ -158,10 +158,10 @@ carry on. [More](SETUP.md#step-6---codex-web-gpt-optional).
 ./t3-start.sh                        # start/reuse T3 alone, any mode
 ./t3-stop.sh                         # stop only the T3 server + tunnel CodeLaunch owns
 . ./scripts/env.sh
-codelaunch_load_env T3_CHANNEL       # must match the desktop app
-npx "t3@$T3_CHANNEL" auth session list      # active device sessions
-npx "t3@$T3_CHANNEL" auth pairing list      # outstanding pairing tokens
-npx "t3@$T3_CHANNEL" auth pairing revoke <id>   # kill one
+codelaunch_load_env T3_CHANNEL T3_VERSION   # the channel must match the desktop app
+npx "t3@${T3_VERSION:-$T3_CHANNEL}" auth session list      # active device sessions
+npx "t3@${T3_VERSION:-$T3_CHANNEL}" auth pairing list      # outstanding pairing tokens
+npx "t3@${T3_VERSION:-$T3_CHANNEL}" auth pairing revoke <id>   # kill one
 ./cliproxy/login.sh                  # manual Codex re-auth (on-host, browser)
 ```
 

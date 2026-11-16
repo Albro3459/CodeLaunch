@@ -66,7 +66,7 @@ if [ "$T3_MODE" = connect ]; then
   esac
 fi
 
-codelaunch_load_env T3_CHANNEL T3_PUBLISH_ACTIVITY
+codelaunch_load_env T3_CHANNEL T3_PUBLISH_ACTIVITY T3_VERSION
 # Connect mode only reaches here with --disable, which needs no port.
 if [ "$T3_MODE" = custom ]; then
   codelaunch_load_env T3_PORT
@@ -78,7 +78,7 @@ case "$T3_CHANNEL" in
   nightly|latest) ;;
   *) echo "T3_CHANNEL must be 'nightly' or 'latest', got '$T3_CHANNEL'"; exit 1 ;;
 esac
-PKG="t3@$T3_CHANNEL"
+PKG="t3@${T3_VERSION:-$T3_CHANNEL}"
 
 : "${T3_PUBLISH_ACTIVITY:=0}"
 case "$T3_PUBLISH_ACTIVITY" in

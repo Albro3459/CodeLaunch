@@ -97,6 +97,12 @@ read_status() {
   command -v jq >/dev/null 2>&1 || { echo "missing required dependency: jq"; echo "Install it with: brew install jq"; exit 1; }
   local json
   if ! json=$(codelaunch_t3_cli connect status --json 2>/dev/null); then
+    # A source build without T3 Connect's public config has no connect commands.
+    # That only matters when publishing is meant to be on.
+    if [ "$T3_PUBLISH_ACTIVITY" != 1 ]; then
+      echo "publish agent activity off (T3_PUBLISH_ACTIVITY=0) - T3 Connect status unavailable, not checked"
+      exit 0
+    fi
     echo "could not read T3 Connect status"
     exit 1
   fi

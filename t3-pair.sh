@@ -72,7 +72,7 @@ case "$T3_CUSTOM_ACCESS" in
 esac
 RUN_MODE="custom-$T3_CUSTOM_ACCESS"
 
-codelaunch_load_env T3_PORT T3_BIND T3_CHANNEL T3_CHANNEL_SKIP_CHECK T3_WARP_REPO
+codelaunch_load_env T3_PORT T3_BIND T3_CHANNEL T3_CHANNEL_SKIP_CHECK T3_VERSION T3_WARP_REPO
 codelaunch_require_env T3_PORT
 
 # The public hostname is Cloudflare-only configuration, so it is read in
@@ -96,7 +96,7 @@ case "$T3_CHANNEL" in
   nightly|latest) ;;
   *) echo "T3_CHANNEL must be 'nightly' or 'latest', got '$T3_CHANNEL'"; exit 1 ;;
 esac
-PKG="t3@$T3_CHANNEL"
+PKG="t3@${T3_VERSION:-$T3_CHANNEL}"
 codelaunch_t3_cli_init "$PKG" || exit 1
 
 : "${T3_BIND:=loopback}"

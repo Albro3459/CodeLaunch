@@ -46,7 +46,7 @@ done
 # Only the mode-selection variables are read here. Connect mode must never load,
 # validate, or export the custom networking configuration.
 codelaunch_private_file .env
-codelaunch_load_env --optional T3_MODE T3_CUSTOM_ACCESS T3_CHANNEL T3_CHANNEL_SKIP_CHECK T3_WARP_REPO
+codelaunch_load_env --optional T3_MODE T3_CUSTOM_ACCESS T3_CHANNEL T3_CHANNEL_SKIP_CHECK T3_VERSION T3_WARP_REPO
 : "${T3_MODE:=connect}"
 : "${T3_CHANNEL:=latest}"
 case "$T3_MODE" in
@@ -57,7 +57,7 @@ case "$T3_CHANNEL" in
   nightly|latest) ;;
   *) echo "T3_CHANNEL must be 'nightly' or 'latest', got '$T3_CHANNEL'"; exit 1 ;;
 esac
-PKG="t3@$T3_CHANNEL"
+PKG="t3@${T3_VERSION:-$T3_CHANNEL}"
 codelaunch_t3_cli_init "$PKG" || exit 1
 T3_LABEL=${T3_WARP_REPO:-$PKG}
 

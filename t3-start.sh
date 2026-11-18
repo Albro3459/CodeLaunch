@@ -46,7 +46,7 @@ done
 # Only the mode-selection variables are read here. Connect mode must never load,
 # validate, or export the custom networking configuration.
 codelaunch_private_file .env
-codelaunch_load_env --optional T3_MODE T3_CUSTOM_ACCESS T3_CHANNEL T3_CHANNEL_SKIP_CHECK T3_VERSION
+codelaunch_load_env --optional T3_MODE T3_CUSTOM_ACCESS T3_CHANNEL T3_CHANNEL_SKIP_CHECK T3_VERSION T3_WARP_REPO
 : "${T3_MODE:=connect}"
 : "${T3_CHANNEL:=latest}"
 case "$T3_MODE" in
@@ -58,6 +58,8 @@ case "$T3_CHANNEL" in
   *) echo "T3_CHANNEL must be 'nightly' or 'latest', got '$T3_CHANNEL'"; exit 1 ;;
 esac
 PKG="t3@${T3_VERSION:-$T3_CHANNEL}"
+codelaunch_t3_cli_init "$PKG" || exit 1
+T3_LABEL=${T3_WARP_REPO:-$PKG}
 
 if [ "$T3_MODE" = custom ]; then
   : "${T3_CUSTOM_ACCESS:=direct}"
@@ -121,7 +123,7 @@ if [ "$RUN_MODE" = connect ]; then
     CONNECT_DESIRED=''
     CONNECT_AUTHENTICATED=''
     CONNECT_LINKED=''
-    json=$(npx --yes "$PKG" connect status --json 2>/dev/null) || return 1
+    json=$(codelaunch_t3_cli connect status --json 2>/dev/null) || return 1
     printf '%s' "$json" | jq -e '
       type == "object" and
       (.desired | type == "boolean") and
@@ -145,20 +147,20 @@ if [ "$RUN_MODE" = connect ]; then
     [ -t 0 ] && [ -t 1 ] && return 0
     echo "T3 Connect setup needs a TTY - it prompts for an out-of-band authorization code."
     echo "Run these on the host, then rerun ./t3-start.sh:"
-    echo "  npx --yes $PKG connect login --headless"
-    echo "  npx --yes $PKG connect link --headless"
+    echo "  $CODELAUNCH_T3_HINT connect login --headless"
+    echo "  $CODELAUNCH_T3_HINT connect link --headless"
     exit 1
   }
 
   if ! connect_status; then
     echo "WARNING: could not read T3 Connect status - starting the server without reconciling the link."
-    echo "  Check it by hand with: npx --yes $PKG connect status"
+    echo "  Check it by hand with: $CODELAUNCH_T3_HINT connect status"
   else
     relink=0
     if [ "$CONNECT_AUTHENTICATED" != true ]; then
       echo "T3 Connect is not authorized on this machine - signing in ..."
       connect_require_tty
-      npx --yes "$PKG" connect login --headless
+      codelaunch_t3_cli connect login --headless
       relink=1
     elif [ "$CONNECT_DESIRED" != true ]; then
       echo "T3 Connect is authorized but this environment is not linked - linking ..."
@@ -166,12 +168,12 @@ if [ "$RUN_MODE" = connect ]; then
     elif connect_link_is_publish_only; then
       echo "T3 Connect is linked for publishing only - replacing it with a full Connect link ..."
       connect_require_tty
-      npx --yes "$PKG" connect unlink
+      codelaunch_t3_cli connect unlink
       relink=1
     fi
     if [ "$relink" = 1 ]; then
       connect_require_tty
-      npx --yes "$PKG" connect link --headless
+      codelaunch_t3_cli connect link --headless
       connect_status || true
     fi
     if [ "$CONNECT_LINKED" = true ]; then
@@ -194,8 +196,8 @@ if [ "$RUN_MODE" = connect ]; then
       echo "a headless T3 server is already running but was not started by CodeLaunch (PID $unowned) - reusing it"
       echo "  ./t3-stop.sh will leave it alone. Stop it yourself to hand the lifecycle to CodeLaunch."
     else
-      echo "starting T3 server ($PKG) ..."
-      owned_pid=$(codelaunch_t3_serve_start "$RUN_MODE" "$PKG" "$T3_SERVE_LOG") || exit 1
+      echo "starting T3 server ($T3_LABEL) ..."
+      owned_pid=$(codelaunch_t3_serve_start "$RUN_MODE" "$T3_SERVE_LOG") || exit 1
       echo "T3 server up (owned PID $owned_pid)"
       echo "log: $T3_SERVE_LOG"
     fi
@@ -212,7 +214,7 @@ if [ "$RUN_MODE" = connect ]; then
         echo "WARNING: T3 Connect link reconcile FAILED this boot - this machine is NOT reachable through T3 Connect."
         echo "  The stored credential no longer refreshes, or the relay was unreachable at startup."
         echo "  'connect status' will still say 'provisioned' - it reads stale local files."
-        echo "  Fix: npx --yes $PKG connect login --headless, then ./t3-stop.sh && ./t3-start.sh"
+        echo "  Fix: $CODELAUNCH_T3_HINT connect login --headless, then ./t3-stop.sh && ./t3-start.sh"
         echo "  Detail: grep -A4 '$CODELAUNCH_T3_RECONCILE_FAIL' $T3_SERVE_LOG"
         ;;
       *)
@@ -275,8 +277,8 @@ if [ -z "$owned_pid" ]; then
     echo "T3 backend already listening on :$T3_PORT but not started by CodeLaunch - reusing it"
     echo "  ./t3-stop.sh will leave it alone."
   else
-    echo "starting headless T3 backend ($PKG) on $BIND_HOST:$T3_PORT ..."
-    owned_pid=$(codelaunch_t3_serve_start "$RUN_MODE" "$PKG" "$T3_SERVE_LOG" --host "$BIND_HOST" --port "$T3_PORT") || exit 1
+    echo "starting headless T3 backend ($T3_LABEL) on $BIND_HOST:$T3_PORT ..."
+    owned_pid=$(codelaunch_t3_serve_start "$RUN_MODE" "$T3_SERVE_LOG" --host "$BIND_HOST" --port "$T3_PORT") || exit 1
     echo "T3 backend up (owned PID $owned_pid)"
     echo "log: $T3_SERVE_LOG"
   fi

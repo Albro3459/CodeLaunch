@@ -66,7 +66,7 @@ if [ "$T3_MODE" = connect ]; then
   esac
 fi
 
-codelaunch_load_env T3_CHANNEL T3_PUBLISH_ACTIVITY T3_VERSION
+codelaunch_load_env T3_CHANNEL T3_PUBLISH_ACTIVITY T3_VERSION T3_WARP_REPO
 # Connect mode only reaches here with --disable, which needs no port.
 if [ "$T3_MODE" = custom ]; then
   codelaunch_load_env T3_PORT
@@ -79,6 +79,7 @@ case "$T3_CHANNEL" in
   *) echo "T3_CHANNEL must be 'nightly' or 'latest', got '$T3_CHANNEL'"; exit 1 ;;
 esac
 PKG="t3@${T3_VERSION:-$T3_CHANNEL}"
+codelaunch_t3_cli_init "$PKG" || exit 1
 
 : "${T3_PUBLISH_ACTIVITY:=0}"
 case "$T3_PUBLISH_ACTIVITY" in
@@ -86,8 +87,17 @@ case "$T3_PUBLISH_ACTIVITY" in
   *) echo "T3_PUBLISH_ACTIVITY must be '0' or '1', got '$T3_PUBLISH_ACTIVITY'"; exit 1 ;;
 esac
 
-SETUP_HINT_LOGIN="npx --yes $PKG connect login --headless"
-SETUP_HINT_LINK="npx --yes $PKG connect link --publish-only --headless"
+if [ "$T3_PUBLISH_ACTIVITY" = 1 ] || [ "$MODE" = setup ] || [ "$MODE" = disable ]; then
+  if ! codelaunch_t3_require_cloud_config; then
+    case "$MODE" in
+      setup|disable) exit 1 ;;
+      *) echo "WARNING: publishing unavailable - continuing with local serving and pairing."; exit 0 ;;
+    esac
+  fi
+fi
+
+SETUP_HINT_LOGIN="$CODELAUNCH_T3_HINT connect login --headless"
+SETUP_HINT_LINK="$CODELAUNCH_T3_HINT connect link --publish-only --headless"
 
 # --- persisted state -------------------------------------------------------
 # `connect status --json` reads ~/.t3/userdata/secrets only. `authenticated` means a
@@ -95,13 +105,21 @@ SETUP_HINT_LINK="npx --yes $PKG connect link --publish-only --headless"
 read_status() {
   command -v jq >/dev/null 2>&1 || { echo "missing required dependency: jq"; echo "Install it with: brew install jq"; exit 1; }
   local json
-  if ! json=$(npx --yes "$PKG" connect status --json 2>/dev/null); then
+  if ! json=$(codelaunch_t3_cli connect status --json 2>/dev/null); then
+    # A source build without T3 Connect's public config has no connect commands.
+    # That only matters when publishing is meant to be on.
+    if [ "$T3_PUBLISH_ACTIVITY" != 1 ]; then
+      echo "publish agent activity off (T3_PUBLISH_ACTIVITY=0) - T3 Connect status unavailable, not checked"
+      exit 0
+    fi
     echo "could not read T3 Connect status"
     exit 1
   fi
   if ! printf '%s' "$json" | jq -e '
     type == "object" and
     (.desired | type == "boolean") and
+    (.revoked | type == "boolean") and
+    (.linkMode == "publish_only" or .linkMode == "managed") and
     (.authenticated | type == "boolean") and
     (.linked | type == "boolean") and
     (.publishAgentActivity | type == "boolean")
@@ -112,20 +130,36 @@ read_status() {
   PUBLISH_ENABLED=$(printf '%s' "$json" | jq -r '.publishAgentActivity')
   LINKED=$(printf '%s' "$json" | jq -r '.linked')
   AUTHENTICATED=$(printf '%s' "$json" | jq -r '.authenticated')
+  DESIRED=$(printf '%s' "$json" | jq -r '.desired')
+  REVOKED=$(printf '%s' "$json" | jq -r '.revoked')
+  LINK_MODE=$(printf '%s' "$json" | jq -r '.linkMode')
+}
+
+publish_is_ready() {
+  [ "$PUBLISH_ENABLED" = true ] && [ "$LINKED" = true ] && [ "$AUTHENTICATED" = true ] &&
+    [ "$DESIRED" = true ] && [ "$REVOKED" = false ] && [ "$LINK_MODE" = publish_only ]
+}
+
+warn_publish_state() {
+  echo "WARNING: T3_PUBLISH_ACTIVITY=1 but this machine is not ready for publish-only notifications."
+  [ "$AUTHENTICATED" = true ] || echo "  not signed in to a T3 cloud account"
+  [ "$DESIRED" = true ] || echo "  no desired environment link"
+  [ "$REVOKED" = false ] || echo "  environment link revoked - review it before explicitly relinking"
+  [ "$LINK_MODE" = publish_only ] || echo "  managed link mode - custom mode requires publish_only; no link was converted"
+  [ "$LINKED" = true ] || echo "  environment link pending - provisioning happens on server startup"
+  [ "$PUBLISH_ENABLED" = true ] || echo "  publishing flag is off"
+  echo "  Inspect: $CODELAUNCH_T3_HINT connect status"
+  echo "  Setup: ./t3-publish.sh   (headless OAuth, then restart T3)"
+  echo "  Continuing without verified push notifications."
 }
 
 if [ "$MODE" = check ]; then
   read_status
   if [ "$T3_PUBLISH_ACTIVITY" = 1 ]; then
-    if [ "$PUBLISH_ENABLED" = true ] && [ "$LINKED" = true ] && [ "$AUTHENTICATED" = true ]; then
-      echo "publish agent activity ok: enabled and linked"
+    if publish_is_ready; then
+      echo "publish agent activity ok: enabled and linked for publish_only"
     else
-      echo "WARNING: T3_PUBLISH_ACTIVITY=1 but this machine is not set up to publish."
-      [ "$AUTHENTICATED" = true ] || echo "  not signed in to a T3 cloud account"
-      [ "$LINKED" = true ] || echo "  environment link not provisioned"
-      [ "$PUBLISH_ENABLED" = true ] || echo "  publishing flag is off"
-      echo "  Fix: ./t3-publish.sh   (headless OAuth, then restart T3)"
-      echo "  Continuing without push notifications."
+      warn_publish_state
     fi
   else
     if [ "$PUBLISH_ENABLED" = true ]; then
@@ -149,6 +183,8 @@ fi
 
 if [ "$MODE" = verify ]; then
   if [ "$T3_PUBLISH_ACTIVITY" != 1 ]; then exit 0; fi
+  read_status
+  if ! publish_is_ready; then warn_publish_state; exit 0; fi
   codelaunch_prepare_runtime
   T3_SERVE_LOG="$CODELAUNCH_RUNTIME_DIR/t3-serve.log"
 
@@ -192,7 +228,7 @@ if [ "$MODE" = verify ]; then
     failed)
       echo "WARNING: T3 Connect link reconcile FAILED this boot - push notifications are not working."
       echo "  The stored credential no longer refreshes, or the relay was unreachable at startup."
-      echo "  'npx $PKG connect status' will still say 'provisioned' - it reads stale local files."
+      echo "  '$CODELAUNCH_T3_HINT connect status' will still say 'provisioned' - it reads stale local files."
       echo "  Fix: ./t3-publish.sh   (signs in again, then restart T3)"
       echo "  Detail: grep -A4 '$CODELAUNCH_T3_RECONCILE_FAIL' $T3_SERVE_LOG"
       ;;
@@ -209,7 +245,7 @@ codelaunch_t3_channel_guard "$T3_CHANNEL" "${T3_PORT:-}" || exit 1
 
 if [ "$MODE" = disable ]; then
   echo "disabling agent activity publishing ..."
-  npx --yes "$PKG" connect publish --disable
+  codelaunch_t3_cli connect publish --disable
   echo
   echo "The flag is re-read on every publish, so this takes effect immediately - no restart needed."
   echo "The sign-in and environment link are left in place; re-enable with ./t3-publish.sh."
@@ -220,6 +256,14 @@ if [ "$MODE" = disable ]; then
 fi
 
 # --- setup -----------------------------------------------------------------
+read_status
+if [ "$DESIRED" = true ] && [ "$LINK_MODE" = managed ]; then
+  echo "WARNING: this environment has a desired managed link. No link was converted."
+  echo "Inspect it with: $CODELAUNCH_T3_HINT connect status"
+  echo "Explicitly unlink it before choosing publish-only setup."
+  exit 1
+fi
+
 if [ ! -t 0 ] || [ ! -t 1 ]; then
   echo "setup needs a TTY - it prompts for an out-of-band authorization code."
   echo "Run ./t3-publish.sh from a terminal, or by hand:"
@@ -246,14 +290,14 @@ esac
 
 echo
 echo "step 1/2: signing in (headless - open the URL on any device with a browser)"
-npx --yes "$PKG" connect login --headless
+codelaunch_t3_cli connect login --headless
 
 echo
 echo "step 2/2: linking this environment for publishing only (no managed tunnel)"
-npx --yes "$PKG" connect link --publish-only --headless
+codelaunch_t3_cli connect link --publish-only --headless
 
 echo
-npx --yes "$PKG" connect status
+codelaunch_t3_cli connect status
 
 echo
 if [ "$T3_PUBLISH_ACTIVITY" != 1 ]; then

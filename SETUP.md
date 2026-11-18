@@ -867,6 +867,65 @@ timeout as unknown rather than broken. It is skipped when the desktop app owns t
 since `t3-serve.log` then describes a process that is no longer listening. Connect
 mode does the same read inline, since it depends on the same reconcile.
 
+### 4G. Custom T3 frontend with Warp
+
+`T3_WARP_REPO` is opt-in. Leave it empty to keep the packaged T3 CLI. Set it
+to an absolute path to a prepared `t3-code-warp` checkout to use that checkout's
+server and built frontend for serve, pairing and publishing commands. CodeLaunch
+uses fnm's exact Node `26.12.1` and loads the checkout's env files before the CLI.
+Process values take precedence over `t3code/.env.local`, then `t3code/.env`,
+including the public cloud config aliases.
+
+Prepare dependencies in that checkout with Node `26.12.1` and Vite+ `1.6.0`.
+Build only the web frontend, with empty origins so env files cannot bake
+localhost into the remote client:
+
+```bash
+cd /Users/alexbrodsky/GitHub/t3-code-warp-checkout/t3code
+fnm exec --using=26.12.1 -- vp i
+VITE_HTTP_URL= VITE_WS_URL= fnm exec --using=26.12.1 -- vp run --filter @t3tools/web build
+```
+
+Install the checkout's panelwarp dependencies with the same Node version. Build
+Warp with Rust `1.92.0`, `remote_tty,terminal_only`, and the panelwarp build
+script's `--t3` option. Use a private `LOG` and a dedicated `WARP_TARGET_DIR`:
+T3 packaging moves the profile's `warp.js`, so do not reuse the extension's
+build directory. The packaged bundle must be at
+`warp/target/t3-bundle/current` inside the prepared checkout.
+
+Preflight checks the web index, Warp JS, raw and brotli WASM, installed
+dependencies, the native node-pty addon and its executable `spawn-helper`.
+Some npm installs lose that helper's execute bit. If preflight reports it,
+run its printed `chmod u+x` command for that exact helper and retry. Preflight
+does not repair files automatically.
+
+At operator cutover, use:
+
+```dotenv
+T3_MODE=custom
+T3_CUSTOM_ACCESS=full
+T3_WARP_REPO=/Users/alexbrodsky/GitHub/t3-code-warp-checkout
+T3_HOSTNAME=code.gocloudlaunch.com
+T3_BIND=loopback
+```
+
+Keep the existing Tunnel and Access configuration. The custom domain serves
+this fork's frontend, including Warp, and still requires T3 pairing after
+Access. For direct phone pairing over trusted Wi-Fi or VPN, set `T3_BIND=all`
+as described above.
+Before cutover, back up state and check source migration compatibility with
+the installed server. Keep the working checkout separate from the service.
+
+Public cloud config is optional for local serving and pairing. Publishing
+also needs `T3CODE_RELAY_URL`, `T3CODE_CLERK_PUBLISHABLE_KEY`, and
+`T3CODE_CLERK_CLI_OAUTH_CLIENT_ID` in the process environment or the prepared
+checkout's `t3code/.env.local`. Set `T3_PUBLISH_ACTIVITY=1` and run
+publish-only setup explicitly, then check
+status and this boot's reconcile. A ready notification link must be desired,
+authenticated, provisioned, not revoked, and in `publish_only` mode with
+publishing enabled. Checks warn about managed, revoked and pending links
+without converting them. Confirm real phone delivery separately.
+
 ## Step 5 - Orchestration (start.sh / stop.sh)
 
 `start.sh` owns the top-level flags and the Claudex half. `t3-start.sh` and

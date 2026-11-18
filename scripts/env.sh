@@ -398,17 +398,20 @@ codelaunch_t3_cli_init() {
     /*) ;;
     *) echo "T3_WARP_REPO must be an absolute path, got '$repo'" >&2; return 1 ;;
   esac
-  [ -f "$repo/t3code/apps/server/src/bin.ts" ] || { echo "T3_WARP_REPO is not a t3-code-warp checkout: $repo" >&2; return 1; }
-  [ -f "$repo/t3code/apps/web/dist/index.html" ] || { echo "T3_WARP_REPO's web client isn't built. Run: cd $repo/t3code && vp run build" >&2; return 1; }
-  [ -f "$repo/warp/target/t3-bundle/current/assets/client/wasm/warp.js" ] || { echo "T3_WARP_REPO has no Warp bundle in warp/target/t3-bundle/current. See its docs/stage-1-checkpoint.md" >&2; return 1; }
-  [ -d "$repo/panelwarp/node_modules/node-pty" ] || { echo "T3_WARP_REPO's panelwarp has no node_modules. Run: cd $repo/panelwarp && npm install" >&2; return 1; }
+  [ -f "$repo/t3code/scripts/warp-cli.ts" ] && [ -f "$repo/t3code/scripts/warp-preflight.ts" ] || { echo "T3_WARP_REPO needs the source launcher and preflight: $repo" >&2; return 1; }
   command -v fnm >/dev/null 2>&1 || { echo "missing prerequisite on PATH: fnm (T3_WARP_REPO runs on the Node version t3code pins)" >&2; return 1; }
-  node=$(cd "$repo/t3code" && fnm exec -- node -p process.execPath 2>/dev/null) \
-    || { echo "fnm has no Node for $repo/t3code. Run: cd $repo/t3code && fnm install" >&2; return 1; }
+  node=$(fnm exec --using=26.12.1 -- node -p process.execPath 2>/dev/null) \
+    || { echo "fnm has no Node 26.12.1. Run: fnm install 26.12.1" >&2; return 1; }
+  "$node" "$repo/t3code/scripts/warp-preflight.ts" "$repo" || return 1
   export T3CODE_WARP_BUNDLE_DIR="$repo/warp/target/t3-bundle/current"
   export T3CODE_PANELWARP_DIR="$repo/panelwarp"
-  CODELAUNCH_T3_CLI=("$node" "$repo/t3code/apps/server/src/bin.ts")
-  CODELAUNCH_T3_HINT="$node $repo/t3code/apps/server/src/bin.ts"
+  CODELAUNCH_T3_CLI=("$node" "$repo/t3code/scripts/warp-cli.ts")
+  CODELAUNCH_T3_HINT="\"$node\" \"$repo/t3code/scripts/warp-cli.ts\""
+}
+
+codelaunch_t3_require_cloud_config() {
+  [ -n "${T3_WARP_REPO:-}" ] || return 0
+  "${CODELAUNCH_T3_CLI[0]}" "$T3_WARP_REPO/t3code/scripts/warp-preflight.ts" "$T3_WARP_REPO" --cloud
 }
 
 codelaunch_t3_cli() {
@@ -471,7 +474,7 @@ codelaunch_t3_is_serve() {
   args=$(ps -ww -p "$1" -o args= 2>/dev/null) || return 1
   case "$args" in
     *.app/Contents/*) return 1 ;;
-    *"t3 serve"*|*"/t3code/apps/server/src/bin.ts serve"*) return 0 ;;
+    *"t3 serve"*|*"/t3code/apps/server/src/bin.ts serve"*|*"/t3code/scripts/warp-cli.ts serve"*) return 0 ;;
   esac
   return 1
 }
@@ -575,7 +578,7 @@ codelaunch_t3_owned_pid() {
 # Reported, never signalled.
 codelaunch_t3_unowned_pids() {
   local excluded=" $* " pid
-  for pid in $(pgrep -f 't3 serve|/t3code/apps/server/src/bin\.ts serve' 2>/dev/null || true); do
+  for pid in $(pgrep -f 't3 serve|/t3code/apps/server/src/bin\.ts serve|/t3code/scripts/warp-cli\.ts serve' 2>/dev/null || true); do
     case "$excluded" in *" $pid "*) continue ;; esac
     if codelaunch_t3_is_server "$pid"; then printf '%s\n' "$pid"; fi
   done

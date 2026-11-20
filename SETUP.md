@@ -1032,6 +1032,11 @@ way. A T3 Desktop app, and any headless server CodeLaunch did not start, are
 reported and left running. T3 account authentication and the T3 Connect link are never
 touched: stopping the server is not a reason to unlink the environment.
 
+It also stops t3-code-warp's PTY daemon and its shells: the ones those servers
+started, plus any the `T3_WARP_REPO` checkout left without a server. Otherwise the
+daemon outlives its server and the next server reuses it, so a restart for a new
+build would keep the old daemon and its shells.
+
 ### stop.sh
 
 `./stop.sh` calls `./t3-stop.sh` first, then reverses the Claudex side. It leaves

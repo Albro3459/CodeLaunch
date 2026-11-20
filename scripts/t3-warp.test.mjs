@@ -205,6 +205,35 @@ codelaunch_t3_descendant_pids 100
   assert.equal(result.stdout, '101\n103\n101\n');
 });
 
+test('stop finds the server\'s Warp daemon and ones its checkout left without a server', () => {
+  const f = fixture();
+  const result = shell(f, `
+source scripts/env.sh
+ps() {
+  case "$*" in
+    '-ww -p 201 -o args=') echo '/node /checkout/panelwarp/daemon.js' ;;
+    '-ww -p 202 -o args=') echo '/node /checkout/panelwarp/daemon.js' ;;
+    '-ww -p 203 -o args=') echo '/node /other/panelwarp/daemon.js' ;;
+    '-ww -p 204 -o args=') echo '/node /checkout/panelwarp/daemon.js' ;;
+    '-ww -p 205 -o args=') echo 'less /checkout/panelwarp/daemon.js' ;;
+    '-p 201 -o ppid=') echo '  100' ;;
+    '-p 204 -o ppid=') echo '  300' ;;
+    '-p '*' -o ppid=') echo '    1' ;;
+  esac
+}
+pgrep() { [ "$*" = '-f /panelwarp/daemon\\.js' ] && printf '201\\n202\\n203\\n204\\n205\\n'; }
+T3_WARP_REPO=/checkout/
+codelaunch_t3_warp_daemon_pids 100
+echo --
+codelaunch_t3_warp_daemon_pids ''
+echo --
+T3_WARP_REPO=
+codelaunch_t3_warp_daemon_pids 100
+`);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '201\n202\n--\n202\n--\n201\n');
+});
+
 test('ownership still requires matching PID, command and start identity', () => {
   const f = fixture();
   const result = shell(f, `

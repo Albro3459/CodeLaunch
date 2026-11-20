@@ -65,7 +65,7 @@ only gate.** [More on modes](SETUP.md#modes),
 ./stop.sh
 ```
 
-Delegates the T3 server and any tunnel it started to `./t3-stop.sh`, which stops only
+Delegates the T3 server, its Warp shells and any tunnel it started to `./t3-stop.sh`, which stops only
 what it recorded as CodeLaunch-owned - a T3 Desktop app or a server you started
 yourself is reported and left running, and T3 sign-in and the T3 Connect link are
 never touched. Then stops claudex sessions, Codex Web GPT (if managed), and the
@@ -156,7 +156,7 @@ carry on. [More](SETUP.md#step-6---codex-web-gpt-optional).
 
 ```bash
 ./t3-start.sh                        # start/reuse T3 alone, any mode
-./t3-stop.sh                         # stop only the T3 server + tunnel CodeLaunch owns
+./t3-stop.sh                         # stop only the T3 server, its Warp shells + tunnel CodeLaunch owns
 . ./scripts/env.sh
 codelaunch_load_env T3_CHANNEL T3_VERSION   # the channel must match the desktop app
 npx "t3@${T3_VERSION:-$T3_CHANNEL}" auth session list      # active device sessions

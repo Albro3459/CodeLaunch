@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Stops the T3 server CodeLaunch started, and the Cloudflare tunnel it started
-# with it. Idempotent: a re-run is a clean no-op.
+# Stops the T3 server CodeLaunch started, its Warp PTY daemon and shells, and the
+# Cloudflare tunnel it started with it. Idempotent: a re-run is a clean no-op.
 #
 # Only processes recorded as CodeLaunch-owned are signalled. A T3 Desktop app or
 # a server you started yourself is reported and left running.
@@ -11,6 +11,9 @@ set -euo pipefail
 umask 077
 cd "$(dirname "$0")"
 . ./scripts/env.sh
+# Only finds Warp daemons a dead server left behind, so a bad .env mustn't block the stop
+codelaunch_load_env --optional T3_WARP_REPO \
+  || echo "WARNING: could not read T3_WARP_REPO from .env; only stopping the Warp daemons of running servers"
 
 usage() {
   cat <<'EOF'
@@ -33,10 +36,12 @@ done
 owned_pid=''
 owned_tree=''
 run_mode=''
+warp_daemons=''
 if codelaunch_t3_owned_pid >/dev/null; then
   owned_pid=$CODELAUNCH_T3_PID
   run_mode=$CODELAUNCH_T3_MODE
   owned_tree=$(codelaunch_t3_descendant_pids "$owned_pid" | tr '\n' ' ')
+  warp_daemons=$(codelaunch_t3_warp_daemon_pids "$owned_pid" | tr '\n' ' ')
   echo "stopping CodeLaunch-owned T3 server (PID $owned_pid, mode $run_mode) ..."
   if codelaunch_t3_stop_pid "$owned_pid"; then
     if codelaunch_t3_clear_state; then
@@ -61,6 +66,7 @@ fi
 # --- b. servers an earlier run lost track of -------------------------------
 # Unquoted on purpose - both are numeric PID lists that must word-split.
 for stray_pid in $(codelaunch_t3_stray_pids $owned_pid $owned_tree); do
+  warp_daemons="$warp_daemons $(codelaunch_t3_warp_daemon_pids "$stray_pid" | tr '\n' ' ')"
   echo "stopping T3 server left running by an earlier CodeLaunch run (PID $stray_pid) ..."
   if codelaunch_t3_stop_pid "$stray_pid"; then
     echo "T3 server stopped"
@@ -69,7 +75,19 @@ for stray_pid in $(codelaunch_t3_stray_pids $owned_pid $owned_tree); do
   fi
 done
 
-# --- c. the tunnel we started ----------------------------------------------
+# --- c. Warp's PTY daemons -------------------------------------------------
+# Warp's shells end with their server. A restart is usually for a new build, and
+# the next server would reuse a daemon left running from the old one.
+for daemon_pid in $(printf '%s\n' $warp_daemons $(codelaunch_t3_warp_daemon_pids '') | sort -un); do
+  echo "stopping Warp's PTY daemon and its shells (PID $daemon_pid) ..."
+  if codelaunch_t3_stop_pid "$daemon_pid"; then
+    echo "Warp's PTY daemon stopped"
+  else
+    echo "WARNING: Warp's PTY daemon is still running after SIGKILL (PID $daemon_pid)"
+  fi
+done
+
+# --- d. the tunnel we started ----------------------------------------------
 tunnel_name=''
 if codelaunch_t3_read_tunnel_state; then
   tunnel_name=$CODELAUNCH_T3_TUNNEL
@@ -107,7 +125,7 @@ if [ -n "$tunnel_name" ]; then
   fi
 fi
 
-# --- d. what was left alone ------------------------------------------------
+# --- e. what was left alone ------------------------------------------------
 unowned=$(codelaunch_t3_unowned_pids $owned_pid $owned_tree | tr '\n' ' ')
 unowned=${unowned% }
 if [ -n "$unowned" ]; then

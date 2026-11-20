@@ -457,8 +457,8 @@ codelaunch_t3_command() {
 
 # Every descendant of $1. Collect them before signalling, since each one is
 # reparented to launchd once its parent exits and can no longer be found by parent.
-# Skips t3-code-warp's PTY daemon and its shells: it outlives the server on
-# purpose, so Warp's shells survive a restart.
+# Skips t3-code-warp's PTY daemon and its shells, which t3-stop.sh stops on its
+# own after the servers.
 codelaunch_t3_descendant_pids() {
   local parent=$1 pid
   case "$parent" in ''|*[!0-9]*) return 0 ;; esac
@@ -468,6 +468,26 @@ codelaunch_t3_descendant_pids() {
     esac
     printf '%s\n' "$pid"
     codelaunch_t3_descendant_pids "$pid"
+  done
+}
+
+# t3-code-warp PTY daemons that go with $1, a T3 server: the ones it started,
+# plus any the T3_WARP_REPO checkout left without a server, which the next server
+# would reuse. Pass '' for only the latter.
+codelaunch_t3_warp_daemon_pids() {
+  local server=$1 repo=${T3_WARP_REPO:-} pid parent args
+  repo=${repo%/}
+  for pid in $(pgrep -f '/panelwarp/daemon\.js' 2>/dev/null || true); do
+    args=$(ps -ww -p "$pid" -o args= 2>/dev/null) || continue
+    parent=$(ps -p "$pid" -o ppid= 2>/dev/null) || continue
+    parent=${parent//[[:space:]]/}
+    case "${args%% *}" in node|*/node) ;; *) continue ;; esac
+    case "$args" in */panelwarp/daemon.js) ;; *) continue ;; esac
+    if [ -n "$server" ] && [ "$parent" = "$server" ]; then
+      printf '%s\n' "$pid"
+    elif [ "$parent" = 1 ] && [ -n "$repo" ]; then
+      case "$args" in *" $repo/panelwarp/daemon.js") printf '%s\n' "$pid" ;; esac
+    fi
   done
 }
 

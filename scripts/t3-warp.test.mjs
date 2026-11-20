@@ -29,7 +29,7 @@ function fixture() {
   for (const file of ['scripts/warp-preflight.ts', 'scripts/lib/public-config.ts']) {
     fs.copyFileSync(path.join(sourceRepo, 't3code', file), path.join(repo, 't3code', file));
   }
-  fs.writeFileSync(path.join(repo, 't3code/package.json'), '{"type":"module"}');
+  fs.writeFileSync(path.join(repo, 't3code/package.json'), '{"type":"module","engines":{"node":"26.13.1"}}');
   const calls = path.join(root, 'calls');
   fs.writeFileSync(path.join(repo, 't3code/scripts/warp-cli.ts'), `
 import fs from 'node:fs';
@@ -37,7 +37,7 @@ fs.appendFileSync(process.env.FIXTURE_CALLS, JSON.stringify(process.argv.slice(2
 if (process.argv.slice(2).join(' ') !== 'connect status --json') throw new Error('unexpected CLI mutation');
 console.log(process.env.FIXTURE_STATUS);
 `);
-  fs.writeFileSync(path.join(root, 'bin/fnm'), `#!/bin/sh\n[ "$1" = exec ] && [ "$2" = --using=26.12.1 ] || exit 1\nprintf '%s\\n' '${process.execPath}'\n`, { mode: 0o700 });
+  fs.writeFileSync(path.join(root, 'bin/fnm'), `#!/bin/sh\n[ "$1" = exec ] && [ "$2" = --using=26.13.1 ] || exit 1\nprintf '%s\\n' '${process.execPath}'\n`, { mode: 0o700 });
   fs.writeFileSync(path.join(launch, '.env'), `T3_MODE=custom\nT3_PORT=49999\nT3_PUBLISH_ACTIVITY=1\nT3_WARP_REPO="${repo}"\n`, { mode: 0o600 });
   return {
     root, home, launch, repo, calls,

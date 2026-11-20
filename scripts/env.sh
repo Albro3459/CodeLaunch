@@ -388,7 +388,7 @@ codelaunch_t3_channel_guard() {
 # ~/.t3 store. Sets CODELAUNCH_T3_CLI (an array) and CODELAUNCH_T3_HINT, the
 # same command to print. Call it directly so the array reaches the caller.
 codelaunch_t3_cli_init() {
-  local pkg=$1 repo=${T3_WARP_REPO:-} node
+  local pkg=$1 repo=${T3_WARP_REPO:-} node version
   if [ -z "$repo" ]; then
     CODELAUNCH_T3_CLI=(npx --yes "$pkg")
     CODELAUNCH_T3_HINT="npx --yes $pkg"
@@ -400,8 +400,10 @@ codelaunch_t3_cli_init() {
   esac
   [ -f "$repo/t3code/scripts/warp-cli.ts" ] && [ -f "$repo/t3code/scripts/warp-preflight.ts" ] || { echo "T3_WARP_REPO needs the source launcher and preflight: $repo" >&2; return 1; }
   command -v fnm >/dev/null 2>&1 || { echo "missing prerequisite on PATH: fnm (T3_WARP_REPO runs on the Node version t3code pins)" >&2; return 1; }
-  node=$(fnm exec --using=26.12.1 -- node -p process.execPath 2>/dev/null) \
-    || { echo "fnm has no Node 26.12.1. Run: fnm install 26.12.1" >&2; return 1; }
+  version=$(sed -n '/"engines"/,/}/s/.*"node": *"\([^"]*\)".*/\1/p' "$repo/t3code/package.json" | head -1)
+  [ -n "$version" ] || { echo "no engines.node pin in $repo/t3code/package.json" >&2; return 1; }
+  node=$(fnm exec --using="$version" -- node -p process.execPath 2>/dev/null) \
+    || { echo "fnm has no Node $version. Run: fnm install $version" >&2; return 1; }
   "$node" "$repo/t3code/scripts/warp-preflight.ts" "$repo" || return 1
   export T3CODE_WARP_BUNDLE_DIR="$repo/warp/target/t3-bundle/current"
   export T3CODE_PANELWARP_DIR="$repo/panelwarp"

@@ -872,18 +872,19 @@ mode does the same read inline, since it depends on the same reconcile.
 `T3_WARP_REPO` is opt-in. Leave it empty to keep the packaged T3 CLI. Set it
 to an absolute path to a prepared `t3-code-warp` checkout to use that checkout's
 server and built frontend for serve, pairing and publishing commands. CodeLaunch
-uses fnm's exact Node `26.12.1` and loads the checkout's env files before the CLI.
+uses fnm's exact Node from `engines.node` in the checkout's `t3code/package.json`
+(`26.13.1` for T3 0.1.10) and loads the checkout's env files before the CLI.
 Process values take precedence over `t3code/.env.local`, then `t3code/.env`,
 including the public cloud config aliases.
 
-Prepare dependencies in that checkout with Node `26.12.1` and Vite+ `1.6.0`.
+Prepare dependencies in that checkout with the same Node and Vite+ `1.6.0`.
 Build only the web frontend, with empty origins so env files cannot bake
 localhost into the remote client:
 
 ```bash
 cd /Users/alexbrodsky/GitHub/t3-code-warp-checkout/t3code
-fnm exec --using=26.12.1 -- vp i
-VITE_HTTP_URL= VITE_WS_URL= fnm exec --using=26.12.1 -- vp run --filter @t3tools/web build
+fnm exec --using=26.13.1 -- vp i
+VITE_HTTP_URL= VITE_WS_URL= fnm exec --using=26.13.1 -- vp run --filter @t3tools/web build
 ```
 
 Install the checkout's panelwarp dependencies with the same Node version. Build

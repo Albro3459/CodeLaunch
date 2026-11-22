@@ -917,6 +917,15 @@ as described above.
 Before cutover, back up state and check source migration compatibility with
 the installed server. Keep the working checkout separate from the service.
 
+To roll back to Connect, stop T3 with `./t3-stop.sh`, put back the `.env`
+values from before cutover (`T3_MODE=connect`, an empty `T3_WARP_REPO`, and
+the other `T3_*` values you changed), and restore the state backup if the
+checkout's server migrated state the installed server cannot open. Then run
+`./t3-start.sh`, which replaces a publish-only link it can identify with a
+full Connect link. Clearing `T3_WARP_REPO` alone is not a rollback:
+`T3_MODE=custom` and `T3_CUSTOM_ACCESS=full` stay, so T3 keeps serving through
+the tunnel and Access with the packaged CLI instead of Connect.
+
 Public cloud config is optional for local serving and pairing. Publishing
 also needs `T3CODE_RELAY_URL`, `T3CODE_CLERK_PUBLISHABLE_KEY`, and
 `T3CODE_CLERK_CLI_OAUTH_CLIENT_ID` in the process environment or the prepared
